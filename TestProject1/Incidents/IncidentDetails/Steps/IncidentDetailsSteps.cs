@@ -44,11 +44,44 @@ using static StateTab;
                 Log.Debug($"Resident is selected {info.Name}");
                 return info;
             }
-            public async Task SwitchToTab(string tabName)
+        public async Task SwitchToTab(string tabName)
+        {
+            Log.Debug($"Переключаемся на вкладку: {tabName}");
+
+            // 1. Кликаем по вкладке
+            await _createPage.ClickTabAsync(tabName, new() { Timeout = 30000 });
+
+            // 2. Находим активную панель контента
+            var tabContentPanel = _page.GetByRole(AriaRole.Tabpanel, new() { Name = tabName });
+            await tabContentPanel.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 10000 });
+
+            // 3. ЖДЕМ ЗАВЕРШЕНИЯ АНИМАЦИИ (ждем, пока opacity станет равен 1)
+            Log.Debug("Ждем завершения CSS-анимации вкладки...");
+            try
             {
-                await _createPage.ClickTabAsync(tabName, new() { Timeout = 30000 });
-                Log.Debug($"Switched to tab {tabName}");
+                // Опрашиваем элемент, пока стили анимации не придут в финальное состояние
+                await _page.WaitForFunctionAsync(
+                    "el => window.getComputedStyle(el).opacity === '1'",
+                    await tabContentPanel.ElementHandleAsync(),
+                    new() { Timeout = 5000 }
+                );
             }
+            catch
+            {
+                Log.Warning("Анимация opacity не завершилась вовремя, пробуем сделать стабилизирующую паузу.");
+                // Хэндшейк-задержка на случай жесткого лага рендеринга на QA-стенде
+                await Task.Delay(1000);
+            }
+
+            // 4. ПРОВЕРКА ГОТОВНОСТИ ЭЛЕМЕНТОВ
+            // Находим первый чекбокс на вкладке State и ждем, пока он станет полностью доступен для клика
+            var firstCheckbox = tabContentPanel.Locator("mat-checkbox, input[type='checkbox']").First;
+            await firstCheckbox.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5000 });
+            await Microsoft.Playwright.Assertions.Expect(firstCheckbox).ToBeEnabledAsync(new() { Timeout = 5000 });
+
+            Log.Debug($"Вкладка {tabName} полностью готова к работе!");
+        }
+
         public async Task FillGeneralTabAsync(IncidentTestData data)
             {
                 await _createPage.General.FillBasicInfoAsync(data.General);
@@ -222,15 +255,18 @@ using static StateTab;
             {
                 string fieldName = fieldEntry.Key;
                 var (Action, Reset, _) = fieldEntry.Value;
+                Log.Debug($"Checking field {fieldName}");
 
-                // 1. Ждем появления точки перед началом (если она вдруг не успела появиться от прошлого шага)
+                // Скроллим обратно вверх к индикатору, чтобы он гарантированно попал в viewport
+                await _createPage.State.GeneralPointLocator.ScrollIntoViewIfNeededAsync();
+
+                // 1. Ждем появления точки перед началом
                 await _createPage.State.GeneralPointLocator.WaitForAsync(new() { State = WaitForSelectorState.Visible });
 
                 // 2. ВКЛЮЧАЕМ поле
                 await Action.Invoke();
 
                 // 3. УМНОЕ ОЖИДАНИЕ: Ждем, пока точка ИСЧЕЗНЕТ
-                // Тест пойдет дальше мгновенно, как только точка пропадет из DOM или станет невидимой
                 await _createPage.State.GeneralPointLocator.WaitForAsync(new() { State = WaitForSelectorState.Hidden });
 
                 // Дополнительная проверка для надежности
@@ -239,6 +275,9 @@ using static StateTab;
 
                 // 4. СБРОС (выключаем поле)
                 await Reset.Invoke();
+
+                // Перед проверкой возвращения точки снова возвращаем скролл наверх
+                await _createPage.State.GeneralPointLocator.ScrollIntoViewIfNeededAsync();
 
                 // 5. УМНОЕ ОЖИДАНИЕ: Ждем, пока точка ПОЯВИТСЯ
                 await _createPage.State.GeneralPointLocator.WaitForAsync(new() { State = WaitForSelectorState.Visible });

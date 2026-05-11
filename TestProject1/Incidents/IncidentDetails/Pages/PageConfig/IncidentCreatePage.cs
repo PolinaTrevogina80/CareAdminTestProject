@@ -44,68 +44,76 @@ public class IncidentCreatePage : BaseIncidentTabs
                    .ClickAsync();
     }
 
-    public async Task<ResidentInfo> SelectResidentAsyncByInd(int index)
+    public async Task<ResidentInfo> SelectResidentAsyncByInd(int index, int maxRetries = 3)
     {
-        // 1. Открываем список
-        var residentField = _page.GetByLabel("Resident");
-        await residentField.ClickAsync();
+        var residentField = _page.Locator("mat-select, .mat-mdc-select").First;
+        var dropdownPanel = _page.Locator(".mat-mdc-select-panel, .mat-select-panel").First;
 
-        // 2. Ждем появления контейнера
-        Log.Debug("Находим дропдаун");
+        // Ждем, пока прекратятся фоновые сетевые запросы Angular, чтобы UI не тормозил
+        await _page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
-        var overlay = _page.Locator(".mat-mdc-select-trigger");
-        await overlay.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 30000 });
-
-        // 3. Находим нужную опцию
-        Log.Debug("Дропдаун нашли, ищем резидента по индексу");
-        Log.Debug("Ищем резидента по индексу через Role");
-
-        var targetOption = _page.GetByRole(AriaRole.Option).Nth(index);
-        await targetOption.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 30000 });
-
-
-        // 4. ИЗВЛЕКАЕМ ТЕКСТ (сохраняем твои Room и Bed)
-        var fullText = await targetOption.InnerTextAsync();
-        var parts = fullText.Split('\n', StringSplitOptions.RemoveEmptyEntries)
-                            .Select(p => p.Trim()).ToArray();
-
-        // 5. КЛИКАЕМ по опции
-        // 5. ФОКУСИРУЕМСЯ И НАЖИМАЕМ ENTER (имитация реального выбора пользователя)
-        // Альтернативный вариант (JS-клик, который точно дернет Angular-биндеры)
-        await targetOption.DispatchEventAsync("click");
-        Log.Debug("Резидента выбрали через DispatchEvent");
-        //Log.Debug("Резидента нашли и кликнули");
-
-        // --- ДОБАВЛЯЕМ "ДОЖИМ", ЧТОБЫ ФОРМА ПРОСНУЛАСЬ ---
-        await Task.Delay(500); // Даем время на срабатывание клика
-
-        // Если список не закрылся сам, кликаем по полю еще раз и жмем Enter
-
-        if (await targetOption.IsVisibleAsync())
+        for (int attempt = 1; attempt <= maxRetries; attempt++)
         {
-            Log.Debug("Дропдаун сам не закрылся, пробуем закрыть по ентеру");
+            Log.Debug($"[Попытка {attempt}/{maxRetries}] Открываем селект резидентов...");
 
-            await residentField.ClickAsync(new() { Force = true });
-            await _page.Keyboard.PressAsync("Enter");
+            try
+            {
+                await residentField.ScrollIntoViewIfNeededAsync();
+                await residentField.FocusAsync();
+                await Task.Delay(300); // Даем фокусу зафиксироваться
+                await _page.Keyboard.PressAsync("Space");
+
+                // Увеличиваем таймаут ожидания панели до 8 секунд
+                await dropdownPanel.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 8000 });
+                await Task.Delay(500);
+
+                var targetOption = dropdownPanel.GetByRole(AriaRole.Option).Nth(index);
+                await targetOption.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5000 });
+
+                var fullText = await targetOption.InnerTextAsync();
+                var parts = fullText.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(p => p.Trim()).ToArray();
+                var expectedName = parts.FirstOrDefault() ?? "";
+
+                Log.Debug($"Выбираем резидента '{expectedName}' стрелками...");
+
+                for (int i = 0; i < index; i++)
+                {
+                    await _page.Keyboard.PressAsync("ArrowDown");
+                    await Task.Delay(150);
+                }
+
+                await _page.Keyboard.PressAsync("Enter");
+                await dropdownPanel.WaitForAsync(new() { State = WaitForSelectorState.Hidden, Timeout = 5000 });
+
+                await _page.Keyboard.PressAsync("Tab");
+
+                Log.Debug("Проверяем появление текстовых блоков MRN и Gender на странице...");
+
+                // Ищем текст MRN и Gender глобально по всей странице, так как они находятся выше тега <form>
+                await Assertions.Expect(_page.Locator("body")).ToContainTextAsync("MRN", new() { Timeout = 10000 });
+                await Assertions.Expect(_page.Locator("body")).ToContainTextAsync("Gender", new() { Timeout = 3000 });
+                await Assertions.Expect(_page.Locator("body")).ToContainTextAsync(expectedName, new() { Timeout = 3000 });
+
+                Log.Debug("Форма успешно подгрузила данные резидента!");
+
+                return new ResidentInfo(
+                    Name: expectedName,
+                    Room: parts.ElementAtOrDefault(1) ?? "",
+                    Bed: parts.ElementAtOrDefault(2) ?? ""
+                );
+            }
+            catch (Exception ex)
+            {
+                Log.Warning($"Попытка {attempt} не удалась. Ошибка: {ex.Message}");
+
+                await _page.Keyboard.PressAsync("Escape");
+                await Task.Delay(2000);
+            }
         }
 
-        // 6. ЖДЕМ ЗАКРЫТИЯ ПАНЕЛИ (используем класс выпадающего списка, а не кнопки)
-        var dropdownPanel = _page.Locator(".mat-mdc-select-panel");
-        await dropdownPanel.WaitForAsync(new() { State = WaitForSelectorState.Hidden, Timeout = 15000 });
-        Log.Debug("Дропдаун закрылся");
-
-        // 7. ОЖИДАНИЕ ОБНОВЛЕНИЯ ФОРМЫ
-        // Так как вкладки появились, лучше привязаться к появлению контейнера вкладок или формы
-        Log.Debug("Ждем активации вкладок формы...");
-        await _page.Locator(".mat-mdc-tab-body-wrapper, [role='tabpanel']").First.WaitForAsync(new() { Timeout = 15000 });
-
-        // 8. ВОЗВРАЩАЕМ ОБЪЕКТ (твоя логика сохранена)
-        return new ResidentInfo(
-            Name: parts.ElementAtOrDefault(0) ?? "",
-            Room: parts.ElementAtOrDefault(1) ?? "",
-            Bed: parts.ElementAtOrDefault(2) ?? ""
-        );
+        throw new Exception($"Не удалось подтвердить выбор резидента и загрузку его метаданных за {maxRetries} попыток.");
     }
+
 
     public async Task ClickTabAsync(string tabName, LocatorClickOptions options = null)
     {

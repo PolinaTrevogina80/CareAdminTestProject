@@ -109,17 +109,12 @@ public class StateTab : BaseIncidentTabs
             false)
             },
 
-            // --- Ambulatory Transfer Status (Radio Buttons) ---
-            { "Independent", (
-            async () => await SelectRadioOptionAsync("Ambulatory Transfer Status", "Independent"),
-            async () => await ClearRadioOptionAsync("Ambulatory Transfer Status"),
-            false)
-            },
-            { "Ambulatory", (
-            async () => await SelectRadioOptionAsync("Ambulatory Transfer Status", "Non Ambulatory"),
-            async () => await ClearRadioOptionAsync("Ambulatory Transfer Status"),
-            false)
-            },
+            //// --- Ambulatory Transfer Status (Radio Buttons) ---
+            //{ "AmbulatoryTransferStatus", (
+            //async () => await SelectRadioOptionAsync("Ambulatory Transfer Status", "Independent"),
+            //async () => await ClearRadioOptionAsync("Ambulatory Transfer Status"),
+            //false)
+            //},
 
             // --- Bowel and Bladder Status (Checkboxes) ---
             { "Foley", (
@@ -137,28 +132,28 @@ public class StateTab : BaseIncidentTabs
 
             // --- Assistive Device (Checkbox + Radio) ---
             { "Wheelchair", (
-                () => SetAssistiveDeviceAsync("Wheelchair", "Used"),
-                () => ResetAssistiveDeviceAsync("Wheelchair"),
-                false)
+                () => SetCheckboxAsync("Wheelchair",true),
+                () => SetCheckboxAsync("Wheelchair",false),
+            false)
             },
             { "WalkerCrutch", (
-                () => SetAssistiveDeviceAsync("Walker/Crutch", "Used"),
-                () => ResetAssistiveDeviceAsync("Walker/Crutch"),
+                () => SetCheckboxAsync("Walker/Crutch", true),
+                () => SetCheckboxAsync("Walker/Crutch", false),
                 false)
             },
             { "Cane", (
-                () => SetAssistiveDeviceAsync("Cane", "Used"),
-                () => ResetAssistiveDeviceAsync("Cane"),
+                () => SetCheckboxAsync("Cane", true),
+                () => SetCheckboxAsync("Cane", false),
                 false)
             },
             { "HearingAid", (
-                () => SetAssistiveDeviceAsync("Hearing Aid", "Used"),
-                () => ResetAssistiveDeviceAsync("Hearing Aid"),
+                () => SetCheckboxAsync("Hearing Aid", true),
+                () => SetCheckboxAsync("Hearing Aid", false),
                 false)
             },
             { "Glasses", (
-                () => SetAssistiveDeviceAsync("Glasses", "Used"),
-                () => ResetAssistiveDeviceAsync("Glasses"),
+                () => SetCheckboxAsync("Glasses", true),
+                () => SetCheckboxAsync("Glasses", false),
                 false)
             }
         };
@@ -226,25 +221,34 @@ public class StateTab : BaseIncidentTabs
         await SetAssistiveDeviceAsync("Glasses", info.Devices.Glasses);
     }
 
-    public ILocator GeneralPointLocator => Page.Locator(".completeness-indicator");
+    public ILocator GeneralPointLocator => Page.Locator(".completeness-message .completeness-indicator:visible");
+
 
     private async Task SetCheckboxAsync(string label, bool isChecked)
     {
-        // Ищем div, внутри которого есть span с точным текстом label, 
-        // и выбираем mat-checkbox в этом же блоке
-        Log.Debug($"Set {label} as {isChecked}");
+        Log.Debug($"Try to set {label} as {isChecked}");
 
-        var checkbox = Page.Locator($"//div[contains(@class, 'checkbox-field') and .//span[text()='{label}']]//mat-checkbox");
+        // 1. Ищем родительский контейнер div, который содержит нужный текст лейбла
+        // Модификатор :visible гарантирует работу только на активной вкладке State
+        var checkboxFieldContainer = Page.Locator($".checkbox-field:visible:has-text('{label}')");
 
-        // Проверяем текущее состояние через aria-checked
-        string ariaChecked = await checkbox.GetAttributeAsync("aria-checked") ?? "false";
-        bool currentState = ariaChecked.ToLower() == "true";
+        // 2. Спускаемся внутрь этого контейнера до нативного инпута для проверки состояния
+        var nativeInput = checkboxFieldContainer.Locator("input[type='checkbox']");
+
+        // 3. Спускаемся до компонента mat-checkbox для совершения клика
+        var matCheckbox = checkboxFieldContainer.Locator("mat-checkbox");
+
+        // Проверяем текущее состояние нативного инпута
+        bool currentState = await nativeInput.IsCheckedAsync();
 
         if (currentState != isChecked)
         {
-            await checkbox.ClickAsync();
+            // Кликаем по mat-checkbox внутри найденного контейнера
+            await matCheckbox.ClickAsync();
+            Log.Debug($"{label} is clicked");
         }
     }
+
 
     protected new ILocator GetFieldByLabel(string labelText)
     {
