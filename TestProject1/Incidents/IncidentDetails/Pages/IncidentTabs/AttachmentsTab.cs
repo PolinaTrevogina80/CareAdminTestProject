@@ -7,6 +7,23 @@ public class AttachmentsTab : BaseIncidentTabs
 {
     public AttachmentsTab(IPage page) : base(page) { }
 
+    public static readonly List<string> AttachmentCategories = new()
+    {
+        "Accident Report",
+        "Charge Nurse – Accident Post Investigation",
+        "Licensed Nurse - Occurrence Investigative Form",
+        "CNA - Occurrence Investigative Form",
+        "CNA Statement",
+        "Employee Statement",
+        "Resident Statement",
+        "Witness Statement",
+        "RN Supervisor - Occurrence Investigative Form",
+        "Hourly/Half Hourly Rounding Sheet",
+        "Shift Staffing Sheet from Smartlinx",
+        "Other",
+        "Summary"
+    };
+
     // Локатор кнопки "+" (Add Attachment)
     private ILocator AddButton => Page.Locator("button.mdc-icon-button:has(mat-icon[data-mat-icon-name='add-icon'])");
 
@@ -126,6 +143,8 @@ public class AttachmentsTab : BaseIncidentTabs
             }
         }
 
+
+
         // 6. Завершение
         var assignButton = dialog.GetByRole(AriaRole.Button, new() { Name = "Assign Pages" });
         Log.Debug("Проверяем доступность финальной кнопки 'Assign Pages'...");
@@ -138,46 +157,120 @@ public class AttachmentsTab : BaseIncidentTabs
         Log.Debug("Попап закрыт, метод завершен успешно.");
     }
 
+    public async Task AssignCategoriesToAllPagesAsync(IReadOnlyList<string> categoryNames, string? notes = null)
+    {
+        Log.Debug("Начинаем процесс полистного присвоения списка категорий.");
+
+        // 1. Находим контейнер попапа
+        var dialog = Page.Locator("mat-dialog-container, cad-incident-assign-pdf-to-category").First;
+        await dialog.WaitForAsync();
+        Log.Debug("Попап Assign Pages найден и отображен.");
+
+        // 2. Ищем текст пагинации для определения количества страниц в PDF
+        var paginationElement = dialog.Locator(".pagination-wrapper, .page-configuration, .pagination").Filter(new() { Has = Page.Locator("mat-icon") }).First;
+        var paginationText = await paginationElement.InnerTextAsync();
+        Log.Debug($"Текст пагинации извлечен: '{paginationText}'");
+
+        var match = System.Text.RegularExpressions.Regex.Match(paginationText, @"of\s+(\d+)");
+        int totalPages = match.Success ? int.Parse(match.Groups[1].Value) : 1;
+        Log.Debug($"Определено общее количество страниц: {totalPages}");
+
+        // На всякий случай проверяем, что переданный список категорий покрывает страницы документа
+        int iterationsCount = Math.Min(totalPages, categoryNames.Count);
+
+        for (int i = 1; i <= iterationsCount; i++)
+        {
+            Log.Debug($"--- Обработка страницы {i} из {totalPages} ---");
+
+            // Ключевое отличие: берем категорию из списка по индексу (i - 1), так как цикл идет с 1
+            string currentCategory = categoryNames[i - 1];
+
+            // 3. Поиск и клик по селекту
+            var dropdown = dialog.Locator("mat-select, cad-lookup-select").First;
+            await dropdown.ScrollIntoViewIfNeededAsync();
+            await dropdown.WaitForAsync(new() { State = WaitForSelectorState.Visible });
+
+            Log.Debug($"Кликаем по выпадающему списку для выбора '{currentCategory}'...");
+            await dropdown.ClickAsync(new() { Force = true });
+
+            // 4. Выбор опции
+            var overlay = Page.Locator(".cdk-overlay-container");
+            await Assertions.Expect(overlay).ToBeVisibleAsync();
+
+            var option = overlay.Locator("mat-option").GetByText(currentCategory, new() { Exact = true });
+            await option.ClickAsync();
+
+            Log.Debug($"Категория '{currentCategory}' успешно выбрана для страницы {i}");
+
+            // 5. Обработка категории Other для текущей страницы
+            if (currentCategory.Equals("Other", StringComparison.OrdinalIgnoreCase))
+            {
+                Log.Debug("Выбрана категория 'Other', заполняем Notes...");
+                var notesField = dialog.Locator("input[name='notes'], input[formcontrolname='notes']").First;
+                string notesToFill = string.IsNullOrEmpty(notes) ? "Auto-generated test notes" : notes;
+                await notesField.FillAsync(notesToFill);
+                Log.Debug($"Поле Notes заполнено текстом: '{notesToFill}'");
+            }
+
+            // 6. Переход к следующей странице
+            if (i < totalPages)
+            {
+                Log.Debug("Нажимаем стрелку 'вправо' для перехода к следующей странице.");
+
+                // Ищем div с классом pagination-button, внутри которого есть иконка chevron_right
+                var nextButton = dialog.Locator("div.pagination-button")
+                    .Filter(new() { HasText = "keyboard_arrow_right" })
+                    .First;
+
+                await nextButton.ScrollIntoViewIfNeededAsync();
+                await nextButton.ClickAsync();
+
+                // Ждем, пока номер страницы на UI обновится (например, станет i + 1)
+                var expectedPageText = $"{i + 1} of {totalPages}";
+                await Assertions.Expect(paginationElement).ToContainTextAsync(expectedPageText);
+                Log.Debug($"Успешно перешли на страницу {i + 1}.");
+            }
+        }
+
+        // 7. Завершение и сохранение
+        var assignButton = dialog.GetByRole(AriaRole.Button, new() { Name = "Assign Pages" });
+        Log.Debug("Проверяем доступность финальной кнопки 'Assign Pages'...");
+
+        await assignButton.ClickAsync();
+        Log.Debug("Кнопка 'Assign Pages' нажата.");
+
+        await dialog.WaitForAsync(new() { State = WaitForSelectorState.Hidden });
+        Log.Debug("Попап закрыт, метод работы со списком завершен успешно.");
+    }
 
     public async Task VerifyAttachmentIsDisplayedAsync(string category)
     {
-        // Ищем элемент, который содержит текст "MRN" и берем число под ним/рядом с ним
-        // Судя по скриншоту, MRN находится в блоке с данными резидента
+        // 1. Получаем MRN резидента из шапки формы
         var mrnElement = Page.Locator("div").Filter(new() { HasText = "MRN" }).Locator("xpath=..").Locator("span, div").Nth(1);
-
-        // Если структура проще, можно попробовать найти по классу (если он есть, например .mrn-value)
-        // Либо через плейсхолдер:
         string mrnText = await Page.GetByText("MRN").Locator("..").InnerTextAsync();
-
-        // Оставляем только цифры (на случай, если там есть подпись "MRN 124216")
         var mrn = System.Text.RegularExpressions.Regex.Match(mrnText, @"\d+").Value;
 
         Log.Debug($"Считанный MRN резидента: {mrn}");
 
-        Log.Debug("Сортируем таблицу по времени, чтобы найти последний загруженный файл.");
+        // 2. Форматируем имя категории для поиска (убираем пробелы и спецсимволы)
+        string formattedCategory = category.Replace(" ", "_").Replace("–", "-");
 
-        // 1. Находим заголовок колонки Time и кликаем для сортировки
-        // В Angular Material клик по заголовку обычно инициирует сортировку
-        var timeHeader = Page.Locator("th").GetByText("Time", new() { Exact = true });
-        await timeHeader.ClickAsync();
+        // Берем только базовую часть: "124216_Accident" или "124216_Charge", 
+        // так как длинные строки могут обрезаться интерфейсом (как видно по "Accident ..." на скриншоте)
+        string searchMask = $"{mrn}_{formattedCategory.Split('_')[0]}";
 
-        // Ждем небольшую анимацию или обновление данных
-        await Page.WaitForTimeoutAsync(500);
+        Log.Debug($"Ищем файл по маске: '{searchMask}'");
 
-        // Если первая строка в таблице не та, что мы ждем, попробуем кликнуть еще раз (смена ASC на DESC)
-        string expectedPart = $"{mrn}_{category}";
-        var firstRow = Page.Locator("tbody tr").First;
+        // 3. Ждем, пока UI полностью обновится после закрытия попапа. 
+        // Даем Angular 1.5 секунды на перерисовку грида, так как файлы склеиваются на бэкенде
+        await Page.WaitForTimeoutAsync(1500);
 
-        if (!await firstRow.GetByText(expectedPart).IsVisibleAsync())
-        {
-            Log.Debug("Первая строка не совпала, меняем направление сортировки...");
-            await timeHeader.ClickAsync();
-            await Page.WaitForTimeoutAsync(500);
-        }
+        // 4. Локализируем строку таблицы, которая содержит нашу маску
+        var targetRow = Page.Locator("tbody tr").Filter(new() { HasText = searchMask }).First;
 
-        // 2. Теперь проверяем самую первую строку максимально строго
-        await Assertions.Expect(firstRow).ToContainTextAsync(expectedPart);
+        // 5. Проверяем видимость строки с увеличенным таймаутом (10 секунд на случай долгой склейки PDF)
+        await Assertions.Expect(targetRow).ToBeVisibleAsync(new() { Timeout = 10000 });
 
-        Log.Debug($"Строгая проверка пройдена: файл '{expectedPart}' находится в первой строке и дата совпадает.");
+        Log.Information($"Файл для категории '{category}' (маска: '{searchMask}') успешно отображается в таблице.");
     }
 }

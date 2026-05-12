@@ -98,7 +98,6 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Pages.IncidentTabs
             await options.Nth(index).ClickAsync();
         }
 
-
         protected async Task ClickControlIcon(string nameAttribute)
         {
             // 1. Кликаем по иконке
@@ -214,94 +213,6 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Pages.IncidentTabs
         }
 
         // Сброс радиокнопок в конкретной секции по заголовку
-        public async Task ClearRadioOptionAsync(string sectionLabel)
-        {
-            var panel = Page.Locator(".state-panel")
-                .Filter(new() { Has = Page.Locator(".state-panel__header").GetByText(sectionLabel, new() { Exact = true }) });
-            await ClearRadioInContainerAsync(panel);
-            Log.Debug($"RadioButton {sectionLabel} is set cleared");
-        }
-
-        public async Task ClearRadioInContainerAsync(ILocator container)
-        {
-            Log.Debug("[CLEAR_RADIO] Запуск очистки контейнера радиокнопок...");
-
-            var radioInputs = container.Locator("mat-radio-button input");
-            int inputsCount = await radioInputs.CountAsync();
-            Log.Debug($"[CLEAR_RADIO] Найдено скрытых элементов 'mat-radio-button input': {inputsCount}");
-
-            if (inputsCount > 0)
-            {
-                Log.Debug("[CLEAR_RADIO] Вызов Angular API для принудительного обновления формы...");
-
-                await radioInputs.EvaluateAllAsync<object>(@"elements => {
-            elements.forEach((el) => {
-                if (el.checked) {
-                    el.checked = false;
-
-                    // 1. Ищем Angular-контекст элемента для прямого вызова реактивной формы
-                    const group = el.closest('mat-radio-group');
-                    if (group) {
-                        // Метод Angular для получения инжектора и вызова формы
-                        if (window.ng) {
-                            try {
-                                // Пытаемся получить инжектор элемента группы радиокнопок
-                                const groupDebug = window.ng.getOwningComponent(group) || window.ng.getComponent(group);
-                                
-                                // Пробуем найти директиву формы на самом элементе группы
-                                const directives = window.ng.getDirectives(group);
-                                const ngControl = directives.find(d => d.control);
-                                
-                                if (ngControl && ngControl.control) {
-                                    console.log('[ANGULAR_API] Найден ngControl группы. Сбрасываем значение...');
-                                    ngControl.control.setValue(null);
-                                    ngControl.control.markAsAsTouched();
-                                    ngControl.control.updateValueAndValidity();
-                                }
-                            } catch (e) {
-                                console.error('[ANGULAR_API] Ошибка обращения к ng API:', e);
-                            }
-                        }
-                        
-                        // Запасной вариант: если форма завязана на родительский тег <form>
-                        const formEl = group.closest('form');
-                        if (formEl && window.ng) {
-                            try {
-                                const formDirective = window.ng.getDirectives(formEl).find(d => d.form || d.formGroup);
-                                if (formDirective) {
-                                    console.log('[ANGULAR_API] Найдена родительская директива формы. Запуск валидации...');
-                                    formDirective.form.markAsDirty();
-                                    formDirective.form.updateValueAndValidity();
-                                }
-                            } catch(e) {}
-                        }
-                    }
-
-                    // Стандартный набор событий (на случай, если форма слушает нативные события)
-                    el.dispatchEvent(new Event('change', { bubbles: true }));
-                    el.dispatchEvent(new Event('input', { bubbles: true }));
-                    el.dispatchEvent(new Event('blur', { bubbles: true }));
-                }
-            });
-            return null;
-        }");
-            }
-
-            // Визуальная зачистка стилей
-            var activeMatRadioButtons = container.Locator("mat-radio-button[class*='checked']");
-            int activeComponentsCount = await activeMatRadioButtons.CountAsync();
-            for (int i = 0; i < activeComponentsCount; i++)
-            {
-                await activeMatRadioButtons.Nth(i).EvaluateAsync(@"el => {
-            el.classList.remove('mat-mdc-radio-checked', 'mdc-radio--checked', 'mat-radio-checked');
-            el.dispatchEvent(new Event('blur', { bubbles: true }));
-        }");
-            }
-
-            await Page.WaitForTimeoutAsync(300);
-            await Page.Mouse.ClickAsync(0, 0);
-            Log.Debug("[CLEAR_RADIO] Очистка и запуск валидации завершены");
-        }
 
 
 

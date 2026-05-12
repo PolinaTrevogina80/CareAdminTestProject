@@ -27,51 +27,100 @@ namespace TestProject1.Common
         [OneTimeSetUp]
         public async Task CreateAuthState()
         {
-            // Настройка Serilog через код (или можно через appsettings.json)
             Serilog.Log.Logger = new LoggerConfiguration()
-                .MinimumLevel.Debug() // Уровень по умолчанию
+                .MinimumLevel.Debug()
                 .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")
                 .WriteTo.File("logs/test-log-.txt", rollingInterval: RollingInterval.Day)
                 .CreateLogger();
 
-            // Создаем фабрику для Microsoft Logging
             var loggerFactory = LoggerFactory.Create(builder => builder.AddSerilog());
             Log = loggerFactory.CreateLogger<BaseTest>();
 
-
-            // 1. Создаем отдельный инстанс Playwright и браузера, так как базовый Browser еще null
             using var playwright = await Microsoft.Playwright.Playwright.CreateAsync();
             await using var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = true });
 
             var authContext = await browser.NewContextAsync(new BrowserNewContextOptions { BaseURL = BaseUrl });
-
             var authPage = await authContext.NewPageAsync();
 
-            await authPage.GotoAsync("/");
-            await authPage.GetByPlaceholder("Username").FillAsync("polly@test.ts");
-            await authPage.GetByPlaceholder("Password").FillAsync("Qwert1@#");
-            await authPage.GetByRole(AriaRole.Button, new() { Name = "SIGN IN" }).ClickAsync();
+            var networkErrors = new List<string>();
+            authPage.Response += (sender, response) =>
+            {
+                if (response.Status >= 400)
+                {
+                    networkErrors.Add($"[HTTP {response.Status}] {response.Request.Method} {response.Url}");
+                }
+            };
 
-            await authPage.WaitForURLAsync(new System.Text.RegularExpressions.Regex(".*home"), new() { Timeout = 30000 });
-            await Expect(authPage.GetByText("My Tasks")).ToBeVisibleAsync(new() { Timeout = 30000 });
+            try
+            {
+                Log.LogInformation($"Переход на базовый URL: {BaseUrl}");
+                var mainResponse = await authPage.GotoAsync("/");
 
-            // Ожидаем появления токена в LocalStorage
-            await authPage.WaitForFunctionAsync(@"() => {
-        for (let i = 0; i < localStorage.length; i++) {
-            if (localStorage.getItem(localStorage.key(i)).includes('accessToken')) return true;
-        }
-        return false;
-    }", null, new PageWaitForFunctionOptions { Timeout = 10000 });
+                if (mainResponse == null || mainResponse.Status >= 400)
+                {
+                    var status = mainResponse?.Status.ToString() ?? "Unknown";
+                    throw new Exception($"Не удалось загрузить стартовую страницу. HTTP Status: {status}");
+                }
 
-            await authPage.WaitForLoadStateAsync(LoadState.NetworkIdle);
+                Log.LogDebug("Заполнение полей авторизации...");
+                await authPage.GetByPlaceholder("Username").FillAsync("polly@test.ts");
+                await authPage.GetByPlaceholder("Password").FillAsync("Qwert1@#");
 
-            // Сохраняем состояние
-            await authContext.StorageStateAsync(new() { Path = StatePath });
-            Log.LogInformation("Successful log in");
+                Log.LogInformation("Нажатие кнопки SIGN IN...");
+                await authPage.GetByRole(AriaRole.Button, new() { Name = "SIGN IN" }).ClickAsync();
 
-            // Закрываем временный браузер
-            await authContext.CloseAsync();
-            await browser.CloseAsync();
+                Log.LogDebug("Ожидание авторизации и проверка ошибок...");
+
+                // Инициализируем локатор для плашки ошибки на форме
+                var errorBanner = authPage.Locator(".mat-mdc-card, form, mat-error, .error-message, [role='alert']")
+                                          .Filter(new() { HasText = "error" })
+                                          .First;
+
+                // Создаем гонку задач: либо мы перейдем на /home, либо на экране отобразится ошибка UI
+                var urlTask = authPage.WaitForURLAsync(new System.Text.RegularExpressions.Regex(@"\/home$"), new() { Timeout = 15000 });
+                var errorTask = errorBanner.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 15000 });
+
+                var completedTask = await Task.WhenAny(urlTask, errorTask);
+
+                // Если первой сработала задача обнаружения ошибки на форме
+                if (completedTask == errorTask && await errorBanner.IsVisibleAsync())
+                {
+                    var errorText = await errorBanner.InnerTextAsync();
+                    var networkSummary = networkErrors.Any() ? string.Join(Environment.NewLine, networkErrors) : "Нет сетевых ошибок";
+
+                    throw new Exception($"Авторизация прервана. На форме отображена ошибка: '{errorText.Trim()}'.{Environment.NewLine}Лог сети:{Environment.NewLine}{networkSummary}");
+                }
+
+                // Если вышли по таймауту или упал urlTask — перепроверяем состояние в стандартном catch
+                await urlTask;
+
+                Log.LogDebug("Проверка видимости элемента 'My Tasks'...");
+                await Expect(authPage.GetByText("My Tasks")).ToBeVisibleAsync(new() { Timeout = 5000 });
+
+                Log.LogDebug("Ожидание появления токена в LocalStorage...");
+                await authPage.WaitForFunctionAsync(@"() => {
+            for (let i = 0; i < localStorage.length; i++) {
+                if (localStorage.getItem(localStorage.key(i)).includes('accessToken')) return true;
+            }
+            return false;
+        }", null, new PageWaitForFunctionOptions { Timeout = 10000 });
+
+                await authPage.WaitForLoadStateAsync(LoadState.NetworkIdle);
+                await authContext.StorageStateAsync(new() { Path = StatePath });
+                Log.LogInformation("Successful log in. Auth state saved.");
+            }
+            catch (Exception ex)
+            {
+                // Сюда попадают как ошибки из блока Task.WhenAny, так и любые таймауты
+                var networkSummary = networkErrors.Any() ? string.Join(Environment.NewLine, networkErrors) : "Лог сетевых запросов пуст";
+                Log.LogError(ex, $"[AUTH CRASH] Ошибка создания AuthState.{Environment.NewLine}Текущий URL: {authPage.Url}{Environment.NewLine}Сетевые ошибки:{Environment.NewLine}{networkSummary}");
+                throw;
+            }
+            finally
+            {
+                await authContext.CloseAsync();
+                await browser.CloseAsync();
+            }
         }
 
 

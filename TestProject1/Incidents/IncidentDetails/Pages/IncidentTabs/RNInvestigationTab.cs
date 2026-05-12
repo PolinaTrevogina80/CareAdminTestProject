@@ -24,7 +24,7 @@ public class RNSupervisorTab : BaseIncidentTabs
         public record QuestionWithDetails(bool Answer, string Comments = "");
     }
 
-    public async Task FillQuestionsAsync(RNSupervisorTabInfo info)
+    public async Task FillQuestionsAsync(RNSupervisorTabInfo info, Func<int, Task>? onStepFilled = null)
     {
         await SelectLocationsAsync(info.Locations);
 

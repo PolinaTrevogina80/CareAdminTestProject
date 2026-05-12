@@ -1,6 +1,7 @@
 ﻿using CareAdminTestProject.Incidents.IncidentDetails.Pages.IncidentTabs;
 using Microsoft.Playwright;
 using Serilog;
+using static System.Net.WebRequestMethods;
 
 public class StateTab : BaseIncidentTabs
 {
@@ -122,6 +123,32 @@ public class StateTab : BaseIncidentTabs
             () => SetCheckboxAsync("Foley",false),
             false)
             },
+            { "ColostomyIleostomy", (
+            () => SetCheckboxAsync("Colostomy/Ileostomy",true),
+            () => SetCheckboxAsync("Colostomy/Ileostomy",false),
+            false)
+            },
+            { "Continent", (
+            () => SetCheckboxAsync("Continent",true),
+            () => SetCheckboxAsync("Continent",false),
+            false)
+            },
+            { "Incontinent", (
+            () => SetCheckboxAsync("Incontinent",true),
+            () => SetCheckboxAsync("Incontinent",false),
+            false)
+            },
+            { "Bowel", (
+            () => SetCheckboxAsync("Bowel",true),
+            () => SetCheckboxAsync("Bowel",false),
+            false)
+            },
+            { "Bladder", (
+            () => SetCheckboxAsync("Bladder",true),
+            () => SetCheckboxAsync("Bladder",false),
+            false)
+            },
+
 
             // --- Alarms (Checkboxes) ---
             { "Bed Alarm", (
@@ -228,14 +255,14 @@ public class StateTab : BaseIncidentTabs
     {
         Log.Debug($"Try to set {label} as {isChecked}");
 
-        // 1. Ищем родительский контейнер div, который содержит нужный текст лейбла
-        // Модификатор :visible гарантирует работу только на активной вкладке State
-        var checkboxFieldContainer = Page.Locator($".checkbox-field:visible:has-text('{label}')");
+        // Ищем контейнер по точному совпадению текста внутри блока с текстом
+        var checkboxFieldContainer = Page.Locator(".checkbox-field:visible")
+            .Filter(new() { Has = Page.Locator("span").GetByText(label, new() { Exact = true }) });
 
-        // 2. Спускаемся внутрь этого контейнера до нативного инпута для проверки состояния
+        // Спускаемся внутрь этого контейнера до нативного инпута для проверки состояния
         var nativeInput = checkboxFieldContainer.Locator("input[type='checkbox']");
 
-        // 3. Спускаемся до компонента mat-checkbox для совершения клика
+        // Спускаемся до компонента mat-checkbox для совершения клика
         var matCheckbox = checkboxFieldContainer.Locator("mat-checkbox");
 
         // Проверяем текущее состояние нативного инпута
@@ -277,18 +304,6 @@ public class StateTab : BaseIncidentTabs
         await radioButton.ClickAsync();
     }
 
-    private async Task ResetAssistiveDeviceAsync(string deviceLabel)
-    {
-        // Находим ту же строку, что и в SetAssistiveDeviceAsync
-        var row = Page.Locator("div.checkbox-field")
-            .Filter(new() { Has = Page.Locator("span.checkbox-field__label").GetByText(deviceLabel, new() { Exact = true }) });
-
-        // 1. Сбрасываем радиокнопки через JS
-        await ClearRadioInContainerAsync(row);
-
-        // 2. Снимаем основной чекбокс
-        await row.Locator("mat-checkbox input").UncheckAsync();
-    }
 
 
 }

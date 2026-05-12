@@ -1,6 +1,7 @@
 ﻿using CareAdminTestProject.Incidents.IncidentDetails.Pages.IncidentTabs;
 using Microsoft.Playwright;
 using Serilog;
+using static DetailsTab;
 
 public class SummaryTab : BaseIncidentTabs
 {
@@ -18,6 +19,42 @@ public class SummaryTab : BaseIncidentTabs
         IReadOnlyList<string> PossibleContributingFactor,
         string DirectorSignature // Имя для поля подписи
     );
+    public Dictionary<string, (Func<Task> Action, bool IsRequired)> GetRequiredFieldsMap(IncidentDetailsInfo data)
+    {
+        var map = new Dictionary<string, (Func<Task> Action, bool IsRequired)>
+    {
+        // 1. Чекбоксы сверху (Необязательные поля, IsRequired = false)
+        { "Care Plan Updated", (() => SetCheckboxAsync("Care Plan Updated", true), false) },
+        { "Set as reportable", (() => SetCheckboxAsync("Set as reportable", true), false) },
+        { "Major Injury", (() => SetCheckboxAsync("Major Injury", true), false) },
+        { "Send to Legal", (() => SetCheckboxAsync("Send to Legal", true), false) },
+
+        // 2. Текстовые редакторы (Rich Text) (Обязательные поля, IsRequired = true)
+        { "Enter summary", (() => FillRichTextFieldAsync("summary", "Summary"), true) },
+        { "Enter plan", (() => FillRichTextFieldAsync("summaryPlan", "Plan"), true) },
+
+        // 3. Радиокнопки заключения (Conclusion) (Обязательное поле)
+        { "Conclusion Reached", (() =>
+            SelectQuestionRadioAsync("Based upon the collection and review of all attached information, the following conclusion has been reached:", "Avoidable"),
+            true)
+        },
+
+        // 4. Секция Evidence of abuse (Обязательное поле, обрабатывает сразу логику No/Yes и раскрывающиеся поля)
+        { "Evidence", (() => FillEvidenceSectionAsync(true, "Evidence Reason"), true) },
+
+        // 5. This will be reported to the DOH, OHMS... (Обязательное радио-поле со второго скриншота)
+        { "This will be reported to the DOH, OHMS, or other agency to intervene?", (() =>
+            SelectSummaryRadioOptionAsync("This will be reported to the DOH, OHMS, or other agency to intervene?", "Yes"),
+            true)
+        },
+
+        // 6. Possible Contributing Factor (Обязательное поле Kendo-мультиселекта)
+        { "Possible Contributing Factor", (() => SelectContributingFactorAsync(new[] { "NOT APPLICABLE" }), true)
+        }
+    };
+
+        return map;
+    }
 
     public SummaryTab(IPage page) : base(page) { }
 

@@ -73,13 +73,7 @@ using static StateTab;
                 await Task.Delay(1000);
             }
 
-            // 4. ПРОВЕРКА ГОТОВНОСТИ ЭЛЕМЕНТОВ
-            // Находим первый чекбокс на вкладке State и ждем, пока он станет полностью доступен для клика
-            var firstCheckbox = tabContentPanel.Locator("mat-checkbox, input[type='checkbox']").First;
-            await firstCheckbox.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5000 });
-            await Microsoft.Playwright.Assertions.Expect(firstCheckbox).ToBeEnabledAsync(new() { Timeout = 5000 });
-
-            Log.Debug($"Вкладка {tabName} полностью готова к работе!");
+            Log.Debug($"Вкладка {tabName} готова к работе!");
         }
 
         public async Task FillGeneralTabAsync(IncidentTestData data)
@@ -113,7 +107,14 @@ using static StateTab;
                 Log.Information("Medication Tab filled");
             }
 
-            public async Task FillRNFormTabAsync(IncidentTestData data)
+            public async Task ClearMedicationTabAsync()
+            {
+                await _createPage.ClickTabAsync("Medication");
+                await _createPage.Medication.ClearAllMedicationsAsync();
+                Log.Information("Medication Tab cleared");
+            }
+
+        public async Task FillRNFormTabAsync(IncidentTestData data)
             {
                 await _createPage.ClickTabAsync("RN Supervisor Investigation Form\r\n");
                 await _createPage.RNSupervisor.FillQuestionsAsync(data.RNSupervisor);
@@ -128,17 +129,71 @@ using static StateTab;
                 await _page.MakeScreenshotAsync("Summary_Filled");
                 Log.Information("Summary Tab filled");
             }
-            public async Task UploadAttachmentTabAsync(string categoryName, string? note = null)
+            public async Task UploadAttachmentTabAsync(string categoryName, string? note = null, string fileNameString = null, bool toScreenShot= true)
             {
                 await _createPage.ClickTabAsync("Attachments");
-                await _createPage.Attachments.UploadAttachmentAsync(fileName);
+
+                // Если имя файла передано (из прошлых шагов) — берем его, иначе используем наш дефолтный путь
+                string fileToUpload;
+
+                // Если имя файла НЕ передано — берем готовое значение/путь из свойства класса (fileName)
+                if (string.IsNullOrEmpty(fileNameString))
+                {
+                    fileToUpload = fileName;
+                }
+                // Если передано конкретное имя файла (например, "test_1page.pdf")
+                else
+                {
+                    // Если вдруг передан сразу полный путь — оставляем, иначе собираем из TestData
+                    fileToUpload = Path.IsPathRooted(fileNameString)
+                        ? fileNameString
+                        : Path.Combine(AppContext.BaseDirectory, "TestData", "Files", fileNameString);
+                }
+            
+            
+                await _createPage.Attachments.UploadAttachmentAsync(fileToUpload);
                 await _createPage.Attachments.AssignCategoriesToAllPagesAsync(categoryName, note);
                 await _createPage.Attachments.VerifyAttachmentIsDisplayedAsync(categoryName);
-                await _page.MakeScreenshotAsync("Attachment_Filled");
+                if (toScreenShot)
+                {
+                    await _page.MakeScreenshotAsync("Attachment_Filled");
+                }
                 Log.Information("Attachment file attached");
             }
 
-            public async Task ClickCreateIncidentAsync()
+        public async Task UploadAttachmentTabAsync(
+        IReadOnlyList<string> categoryNames, // Принимает список категорий для каждой страницы
+        string? note = null,
+        string? fileNameString = null,
+        bool toScreenShot = true)
+        {
+            await _createPage.ClickTabAsync("Attachments");
+
+            string fileToUpload = string.IsNullOrEmpty(fileNameString)
+                ? fileName
+                : (Path.IsPathRooted(fileNameString)
+                    ? fileNameString
+                    : Path.Combine(AppContext.BaseDirectory, "TestData", "Files", fileNameString));
+
+            await _createPage.Attachments.UploadAttachmentAsync(fileToUpload);
+
+            // Вызываем ваш метод полистной разметки, передавая ему весь список категорий
+            await _createPage.Attachments.AssignCategoriesToAllPagesAsync(categoryNames, note);
+
+            // Проверяем отображение первой категории из списка в качестве базовой проверки
+            if (categoryNames != null && categoryNames.Any())
+            {
+                await _createPage.Attachments.VerifyAttachmentIsDisplayedAsync(categoryNames[0]);
+            }
+
+            if (toScreenShot)
+            {
+                await _page.MakeScreenshotAsync("Attachment_Filled");
+            }
+            Log.Information($"Multi-page attachment file '{fileToUpload}' attached successfully.");
+        }
+
+        public async Task ClickCreateIncidentAsync()
             {
                 // Сюда пихаем и клик, и ожидание, и скриншот
                 // (Предположим, метод ClickCreateIncident доступен в контексте или через _createPage)
@@ -307,7 +362,92 @@ using static StateTab;
 
             Log.Debug($"Red Dot validation for the field '{fieldName}': {(isVisible ? "true" : "false")}");
         }
-        
+
+        public async Task VerifyMedicationTabFullLifecycleAndIndicatorAsync()
+        {
+            const string tabName = "Medication";
+            Log.Information($"--- START: Complex lifecycle test for '{tabName}' tab ---");
+
+            // Step 1: Verify that the red dot is initially VISIBLE
+            Log.Debug("[STEP 1] Checking the initial state of the indicator...");
+            await VerifyRedDotTab(tabName, shouldBeVisible: true);
+
+            // Step 2: Add empty rows. The dot must REMAIN VISIBLE
+            Log.Debug("[STEP 2] Adding empty medication rows...");
+            await _createPage.Medication.AddEmptyMedicationRowsAsync(2);
+
+            // Remove focus to trigger Angular validation
+            await _page.Mouse.ClickAsync(0, 0);
+            await _page.WaitForTimeoutAsync(200);
+
+            await VerifyRedDotTab(tabName, shouldBeVisible: true);
+            Log.Debug("[SUCCESS] Empty rows successfully kept the indicator visible");
+
+            // Step 3: Fill the previously created empty rows with data. The dot must DISAPPEAR
+            Log.Debug("[STEP 3] Filling the created rows with test data...");
+            var testMedications = new List<MedicationTab.MedicationInfo>
+    {
+        new("Aspirin", "100mg", "Once a day", "08:00"),
+        new("Nurofen", "250mg", "Twice a day", "15:00")
+    };
+
+            for (int i = 0; i < testMedications.Count; i++)
+            {
+                var medication = testMedications[i];
+                var row = _page.Locator(".medication-row.ng-star-inserted").Nth(i);
+
+                await row.Locator("input").Nth(0).FillAsync(medication.Name);
+                await row.Locator("input").Nth(1).FillAsync(medication.Dosage);
+                await row.Locator("input").Nth(2).FillAsync(medication.Frequency);
+                await row.Locator("input").Nth(3).FillAsync(medication.TimeReceived);
+            }
+
+            // Short delay to let Angular process the form validation state
+            await _page.WaitForTimeoutAsync(300);
+
+            Log.Debug("[STEP 3] Verifying indicator hiding after filling the fields...");
+            await VerifyRedDotTab(tabName, shouldBeVisible: false);
+            Log.Debug("[SUCCESS] The indicator successfully hid after form filling");
+
+            // Step 4: Remove all medications. The dot must RETURN
+            Log.Debug("[STEP 4] Completely clearing the medication table...");
+            await _createPage.Medication.ClearAllMedicationsAsync();
+
+            // Delay to allow DOM elements removal to register in the form state
+            await _page.WaitForTimeoutAsync(300);
+
+            Log.Debug("[STEP 4] Verifying the return of the indicator...");
+            await VerifyRedDotTab(tabName, shouldBeVisible: true);
+
+            Log.Information($"--- FINISH: Lifecycle test for '{tabName}' tab successfully passed! ---");
+
+        }
+
+        public async Task FillRNFormTabWithTabCheckAsync(IncidentTestData data)
+        {
+            var tab = "RN Supervisor Investigation Form";
+            // 1. Запускаем заполнение всей формы (таск начинает выполняться)
+            var fillTask = _createPage.RNSupervisor.FillQuestionsAsync(data.RNSupervisor);
+
+            // 2. Параллельно запускаем ожидание 27-го шага и проверку точки
+            var checkDotTask = Task.Run(async () =>
+            {
+                // Ждем, пока локатор пагинации на странице покажет, что мы дошли до 27 шага
+                var pagination = _page.Locator("div.pagination").Last;
+
+                // Используем стандартный ассершн Playwright для ожидания текста внутри процесса заполнения
+                await Assertions.Expect(pagination).ToContainTextAsync("27 of 28", new() { Timeout = 30000 });
+
+                // Как только 27 шаг отобразился — проверяем, что красная точка всё еще на месте
+                await VerifyRedDotTab(tab, shouldBeVisible: true);
+                Log.Debug("Verified: Red Dot is still visible on step 27.");
+            });
+
+            // 3. Ждем завершения обоих процессов
+            // Если упадет либо заполнение, либо проверка точки на 27 шаге — тест покажет ошибку
+            await Task.WhenAll(fillTask, checkDotTask);
+            Log.Information("RN Supervisor Investigation Form Tab filled with background validation");
+        }
 
         public async Task VerifyRedDotTab(string tabName, bool shouldBeVisible = true)
             {

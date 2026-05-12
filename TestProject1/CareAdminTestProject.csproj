@@ -35,4 +35,13 @@
     <Folder Include="Incidents\Helpers\" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Update="TestData\Files\test_10pages.pdf">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="TestData\Files\test_1page.pdf">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>
