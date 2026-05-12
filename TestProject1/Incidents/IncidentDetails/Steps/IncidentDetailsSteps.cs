@@ -3,11 +3,16 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Playwright;
 using NUnit.Framework;
 using Serilog;
+using static BaseIncidentTests;
+using static CareAdminTestProject.Incidents.IncidentDetails.Pages.IncidentTabs.BaseIncidentTabs;
 using static DetailsTab;
 using static GeneralTab;
 using static IncidentCreatePage;
 using static IncidentDataFactory;
+using static MedicationTab;
 using static StateTab;
+using static SummaryTab;
+using static System.Net.WebRequestMethods;
 
 
 
@@ -343,6 +348,7 @@ using static StateTab;
                 Log.Debug($"Field {fieldName} verified fast and successfully");
             }
         }
+
 
         public async Task VerifyRedDotField(object tabComponent, string fieldName, bool shouldBeVisible = true)
         {

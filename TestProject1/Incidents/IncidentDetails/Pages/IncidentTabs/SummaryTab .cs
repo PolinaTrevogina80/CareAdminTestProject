@@ -5,7 +5,7 @@ using static DetailsTab;
 
 public class SummaryTab : BaseIncidentTabs
 {
-    public record SummaryInfo(
+    public record IncidentSummaryInfo(
         bool CarePlanUpdated,
         bool SetAsReportable,
         bool MajorInjury,
@@ -58,7 +58,7 @@ public class SummaryTab : BaseIncidentTabs
 
     public SummaryTab(IPage page) : base(page) { }
 
-    public async Task FillSummaryInfoAsync(SummaryInfo info)
+    public async Task FillSummaryInfoAsync(IncidentSummaryInfo info)
     {
         // 1. Чекбоксы сверху
         await SetCheckboxAsync("Care Plan Updated", info.CarePlanUpdated);

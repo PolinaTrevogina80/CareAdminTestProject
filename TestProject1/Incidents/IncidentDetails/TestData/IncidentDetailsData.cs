@@ -12,7 +12,7 @@ public static class IncidentDataFactory
         StateTab.IncidentStateInfo State,
         List<MedicationTab.MedicationInfo> Medications,
         RNSupervisorTab.RNSupervisorTabInfo RNSupervisor,
-        SummaryTab.SummaryInfo Summary
+        SummaryTab.IncidentSummaryInfo Summary
         );
     // Базовый метод для создания типичного инцидента (Object Mother)
     public static IncidentTestData CreateDefaultFall(ResidentInfo residentInfo)
@@ -59,6 +59,9 @@ public static class IncidentDataFactory
             unit: "2",
             location: "Lobby",
             type: "Fall",
+            supervisor: 1,
+            chargeNurse: 1,
+            cna: 1,
             activity: "Self-Transferring",
             summary: "Patient found on the floor",
             injury: new List<InjuryInfo>
@@ -177,7 +180,7 @@ public static class IncidentDataFactory
     }
 );
 
-    private static SummaryTab.SummaryInfo CreateDefaultSummary() => new(
+    private static SummaryTab.IncidentSummaryInfo CreateDefaultSummary() => new(
     CarePlanUpdated: true,
     SetAsReportable: true,
     MajorInjury: true,

@@ -155,6 +155,5 @@ public class BaseIncidentTests : BaseTest
 
         return text?.Trim() ?? string.Empty;
     }
-
 }
 

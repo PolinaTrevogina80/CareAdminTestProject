@@ -7,15 +7,6 @@ using static System.Net.Mime.MediaTypeNames;
 [TestFixture]
 public class IncidentTests : BaseIncidentTests
 {
-    [SetUp]
-    public async Task Setup()
-    {
-        // Если в базе тоже есть [SetUp], вызываем его явно (если это override)
-        // await base.Setup(); 
-        Log.LogDebug($"Make Setup, switch to Carrilon");
-
-        await EnsureFacilitySelected("Carillon");
-    }
 
     [Test]
     public async Task CreateIncident_StartWithResidentSelection()

@@ -19,6 +19,7 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Pages.IncidentTabs
             Page = page;
         }
 
+
         protected ILocator GetFieldByLabel(string labelText)
         {
             return Page.Locator("cad-label-value-field")

@@ -20,6 +20,9 @@ public class GeneralTab : BaseIncidentTabs
         string type,
         string activity,
         string summary, 
+        int supervisor,
+        int chargeNurse,
+        int cna,
         List<InjuryInfo> injury
 );
 
@@ -42,9 +45,9 @@ public class GeneralTab : BaseIncidentTabs
         { "Bed", (() => GetFieldByLabel("Bed").FillAsync(data.bed), true) },
         { "Date of Incident", (() => SelectTodayAsync("dateOfIncident"), true) },
         { "Time of Incident", (() => SelectTimeInPickerAsync("timeOfIncident", data.time) ,true)},
-        { "Supervisor", (() => SelectDropdownOptionAsync("Supervisor", 1), true )},
-        { "Charge nurse",( () => SelectDropdownOptionAsync("Charge nurse", 1) , true)},
-        { "CNA", (() => SelectDropdownOptionAsync("CNA", 1), true )},
+        { "Supervisor", (() => SelectDropdownOptionAsync("Supervisor", data.supervisor), true )},
+        { "Charge nurse",( () => SelectDropdownOptionAsync("Charge nurse", data.chargeNurse) , true)},
+        { "CNA", (() => SelectDropdownOptionAsync("CNA", data.cna), true )},
         { "Location of Incident", (() => SelectDropdownOptionAsync("Location of incident", data.location),true) },
         { "Type of Incident",( () => SelectDropdownOptionAsync("Type of incident", data.type),true )},
         { "Activity Prior",( () => SelectDropdownOptionAsync("Activity Prior", data.activity), false) },
@@ -85,7 +88,7 @@ public class GeneralTab : BaseIncidentTabs
 
         await Page.MakeScreenshotAsync("General_Halfly_Filled"); // <--- Скриншот 2
 
-        await SelectDropdownOptionAsync("Supervisor",1 );
+        await SelectDropdownOptionAsync("Supervisor", 1 );
         await SelectDropdownOptionAsync("Charge nurse",1 );
         await SelectDropdownOptionAsync("CNA", 1 );
 

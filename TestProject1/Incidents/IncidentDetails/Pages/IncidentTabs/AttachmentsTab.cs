@@ -1,7 +1,6 @@
 ﻿using CareAdminTestProject.Incidents.IncidentDetails.Pages.IncidentTabs;
 using Microsoft.Playwright;
 using Serilog;
-using System.IO;
 
 public class AttachmentsTab : BaseIncidentTabs
 {
@@ -72,102 +71,42 @@ public class AttachmentsTab : BaseIncidentTabs
 
     public async Task AssignCategoriesToAllPagesAsync(string categoryName, string? notes = null)
     {
-        Log.Debug("Начинаем процесс присвоения категорий страницам.");
+        Log.Debug($"Вызван метод для применения одной категории '{categoryName}' ко всем страницам.");
 
-        // 1. Находим контейнер попапа
+        // Быстро определяем общее число страниц, чтобы построить корректный список
         var dialog = Page.Locator("mat-dialog-container, cad-incident-assign-pdf-to-category").First;
         await dialog.WaitForAsync();
-        Log.Debug("Попап Assign Pages найден и отображен.");
 
-        // 2. Ищем текст пагинации. Нам нужен тот, что сверху между стрелками.
-        // Судя по DOM, он обычно лежит в блоке с классом pagination-wrapper или page-configuration
-        // Мы можем найти его, ища текст, который содержит "of" и находится рядом со стрелками.
         var paginationElement = dialog.Locator(".pagination-wrapper, .page-configuration, .pagination").Filter(new() { Has = Page.Locator("mat-icon") }).First;
         var paginationText = await paginationElement.InnerTextAsync();
-        Log.Debug($"Текст пагинации извлечен: '{paginationText}'");
-
-        // Регулярное выражение теперь ищет число после 'of', игнорируя лишние слова
         var match = System.Text.RegularExpressions.Regex.Match(paginationText, @"of\s+(\d+)");
         int totalPages = match.Success ? int.Parse(match.Groups[1].Value) : 1;
-        Log.Debug($"Определено общее количество страниц: {totalPages}");
 
-        for (int i = 1; i <= totalPages; i++)
-        {
-            Log.Debug($"--- Обработка страницы {i} из {totalPages} ---");
+        // Генерируем список, где имя категории дублируется для каждой страницы document
+        IReadOnlyList<string> categoryNames = Enumerable.Repeat(categoryName, totalPages).ToList();
 
-            // 3. Поиск и клик по селекту
-            var dropdown = dialog.Locator("mat-select, cad-lookup-select").First;
-
-            // Ждем, чтобы элемент был не просто в DOM, а готов к клику
-            await dropdown.ScrollIntoViewIfNeededAsync();
-            await dropdown.WaitForAsync(new() { State = WaitForSelectorState.Visible });
-
-            Log.Debug("Кликаем по выпадающему списку категорий...");
-            // Force: true помогает, если элемент перекрыт прозрачным overlay от предыдущих анимаций
-            await dropdown.ClickAsync(new() { Force = true });
-
-            // 4. Выбор опции
-            var overlay = Page.Locator(".cdk-overlay-container");
-            // Ждем появления контейнера со списком
-            await Assertions.Expect(overlay).ToBeVisibleAsync();
-
-            var option = overlay.Locator("mat-option").GetByText(categoryName, new() { Exact = true });
-            await option.ClickAsync();
-
-            Log.Debug($"Категория '{categoryName}' успешно выбрана для страницы {i}");
-
-            if (categoryName.Equals("Other", StringComparison.OrdinalIgnoreCase))
-            {
-                Log.Debug("Выбрана категория 'Other', заполняем Notes...");
-                // Ищем текстовое поле Notes внутри диалога
-                var notesField = dialog.Locator("input[name='notes'], input[formcontrolname='notes']").First;
-
-                // Если notes не передан, используем дефолтный текст, так как поле обязательное
-                string notesToFill = string.IsNullOrEmpty(notes) ? "Auto-generated test notes" : notes;
-
-                await notesField.FillAsync(notesToFill);
-                Log.Debug($"Поле Notes заполнено текстом: '{notesToFill}'");
-            }
-
-
-            // 5. Переход к следующей странице
-            if (i < totalPages)
-            {
-                Log.Debug("Нажимаем стрелку 'вправо' для перехода к следующей странице.");
-                var nextButton = dialog.Locator("button").Filter(new() { Has = Page.Locator("mat-icon:has-text('keyboard_arrow_right')") });
-                await nextButton.ClickAsync();
-
-                // Ждем обновления контента (номер страницы должен измениться)
-                await Page.WaitForTimeoutAsync(700);
-                Log.Debug("Ожидание после клика по стрелке завершено.");
-            }
-        }
-
-
-
-        // 6. Завершение
-        var assignButton = dialog.GetByRole(AriaRole.Button, new() { Name = "Assign Pages" });
-        Log.Debug("Проверяем доступность финальной кнопки 'Assign Pages'...");
-
-        await assignButton.ClickAsync();
-        Log.Debug("Кнопка 'Assign Pages' нажата.");
-
-        // Ждем закрытия попапа
-        await dialog.WaitForAsync(new() { State = WaitForSelectorState.Hidden });
-        Log.Debug("Попап закрыт, метод завершен успешно.");
+        // Вызываем единый обработчик
+        await AssignCategoriesInternalAsync(categoryNames, notes);
     }
 
     public async Task AssignCategoriesToAllPagesAsync(IReadOnlyList<string> categoryNames, string? notes = null)
     {
-        Log.Debug("Начинаем процесс полистного присвоения списка категорий.");
+        Log.Debug($"Вызван метод для полистного распределения списка из {categoryNames.Count} категорий.");
 
+        // Передаем список напрямую в единый обработчик
+        await AssignCategoriesInternalAsync(categoryNames, notes);
+    }
+
+    private async Task AssignCategoriesInternalAsync(IReadOnlyList<string> categoryNames, string? notes = null)
+    {
         // 1. Находим контейнер попапа
         var dialog = Page.Locator("mat-dialog-container, cad-incident-assign-pdf-to-category").First;
         await dialog.WaitForAsync();
         Log.Debug("Попап Assign Pages найден и отображен.");
 
-        // 2. Ищем текст пагинации для определения количества страниц в PDF
-        var paginationElement = dialog.Locator(".pagination-wrapper, .page-configuration, .pagination").Filter(new() { Has = Page.Locator("mat-icon") }).First;
+        // 2. Ищем текст пагинации для определения количества страниц
+        var paginationElement = dialog.Locator(".pagination-wrapper, .page-configuration, .pagination")
+            .Filter(new() { Has = Page.Locator("mat-icon") }).First;
         var paginationText = await paginationElement.InnerTextAsync();
         Log.Debug($"Текст пагинации извлечен: '{paginationText}'");
 
@@ -175,32 +114,37 @@ public class AttachmentsTab : BaseIncidentTabs
         int totalPages = match.Success ? int.Parse(match.Groups[1].Value) : 1;
         Log.Debug($"Определено общее количество страниц: {totalPages}");
 
-        // На всякий случай проверяем, что переданный список категорий покрывает страницы документа
+        // Защита от выхода за границы переданной коллекции
         int iterationsCount = Math.Min(totalPages, categoryNames.Count);
 
         for (int i = 1; i <= iterationsCount; i++)
         {
             Log.Debug($"--- Обработка страницы {i} из {totalPages} ---");
 
-            // Ключевое отличие: берем категорию из списка по индексу (i - 1), так как цикл идет с 1
-            string currentCategory = categoryNames[i - 1];
+            // Очищаем строку от случайных пробелов по краям (решает проблему с Exact = true)
+            string currentCategory = categoryNames[i - 1]?.Trim() ?? string.Empty;
 
-            // 3. Поиск и клик по селекту
+            // 3. Поиск и клик по селекту (БЕЗ Force: true для стабильности Angular)
             var dropdown = dialog.Locator("mat-select, cad-lookup-select").First;
             await dropdown.ScrollIntoViewIfNeededAsync();
             await dropdown.WaitForAsync(new() { State = WaitForSelectorState.Visible });
 
             Log.Debug($"Кликаем по выпадающему списку для выбора '{currentCategory}'...");
-            await dropdown.ClickAsync(new() { Force = true });
+            await dropdown.ClickAsync();
 
-            // 4. Выбор опции
+            // 4. Выбор опции внутри оверлея
             var overlay = Page.Locator(".cdk-overlay-container");
             await Assertions.Expect(overlay).ToBeVisibleAsync();
 
+            // Ищем опцию. Если Exact = true продолжит падать, можно заменить на Exact = false
             var option = overlay.Locator("mat-option").GetByText(currentCategory, new() { Exact = true });
+            await option.WaitForAsync(new() { State = WaitForSelectorState.Visible });
             await option.ClickAsync();
 
             Log.Debug($"Категория '{currentCategory}' успешно выбрана для страницы {i}");
+
+            // Ждем, пока оверлей полностью закроется, чтобы не перегружать DOM Angular
+            await Assertions.Expect(overlay.Locator("mat-option")).ToHaveCountAsync(0);
 
             // 5. Обработка категории Other для текущей страницы
             if (currentCategory.Equals("Other", StringComparison.OrdinalIgnoreCase))
@@ -212,12 +156,11 @@ public class AttachmentsTab : BaseIncidentTabs
                 Log.Debug($"Поле Notes заполнено текстом: '{notesToFill}'");
             }
 
-            // 6. Переход к следующей странице
+            // 6. Переход к следующей странице (Рабочий локатор из div.pagination-button)
             if (i < totalPages)
             {
                 Log.Debug("Нажимаем стрелку 'вправо' для перехода к следующей странице.");
 
-                // Ищем div с классом pagination-button, внутри которого есть иконка chevron_right
                 var nextButton = dialog.Locator("div.pagination-button")
                     .Filter(new() { HasText = "keyboard_arrow_right" })
                     .First;
@@ -225,7 +168,7 @@ public class AttachmentsTab : BaseIncidentTabs
                 await nextButton.ScrollIntoViewIfNeededAsync();
                 await nextButton.ClickAsync();
 
-                // Ждем, пока номер страницы на UI обновится (например, станет i + 1)
+                // Жесткое ожидание обновления UI
                 var expectedPageText = $"{i + 1} of {totalPages}";
                 await Assertions.Expect(paginationElement).ToContainTextAsync(expectedPageText);
                 Log.Debug($"Успешно перешли на страницу {i + 1}.");
@@ -240,7 +183,7 @@ public class AttachmentsTab : BaseIncidentTabs
         Log.Debug("Кнопка 'Assign Pages' нажата.");
 
         await dialog.WaitForAsync(new() { State = WaitForSelectorState.Hidden });
-        Log.Debug("Попап закрыт, метод работы со списком завершен успешно.");
+        Log.Debug("Попап закрыт, процесс успешно завершен.");
     }
 
     public async Task VerifyAttachmentIsDisplayedAsync(string category)

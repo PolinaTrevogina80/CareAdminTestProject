@@ -64,27 +64,17 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
             await steps.SwitchToTab(tab);
             await steps.ClearDetailsForm();
 
-            //Проверяем, что все таба с красной точкой
             await steps.VerifyRedDotTab(tab, true);
 
-
-            //Проверяем, что все нужные поля с красными точками
             await steps.SwitchFirstAid(true);
             await steps.VerifyAllFieldsDotsStateAsync(steps.CreatePage.Details, data.Details, true);
-            //Заполняем
             await steps.FillDetailsTabAsync(data);
 
-            //До сохранения
-            //Проверяем, что все нужные поля без красных точкек
             await steps.VerifyAllFieldsDotsStateAsync(steps.CreatePage.Details, data.Details, false);
-            //Проверяем, что Таба без красной точки
             await steps.VerifyRedDotTab(tab, false);
             await steps.ClickCreateIncidentAsync();
 
-            //После сохранения
-            //Проверяем, что Таба без красной точки
             await steps.VerifyRedDotTab(tab, false);
-            //Проверяем, что все нужные поля без красных точкек
             await steps.VerifyAllFieldsDotsStateAsync(steps.CreatePage.Details, data.Details, false);
 
         }
