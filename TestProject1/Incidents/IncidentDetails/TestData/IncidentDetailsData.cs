@@ -31,6 +31,7 @@ public static class IncidentDataFactory
         );
     }
 
+
     // Сценарий для другого типа инцидента (Object Mother)
     public static IncidentTestData CreateMedicationError(ResidentInfo residentInfo)
     {
@@ -71,7 +72,12 @@ public static class IncidentDataFactory
         );
     }
 
-    private static DetailsTab.IncidentDetailsInfo CreateDefaultDetails(DateTime now) => new(
+    private static DetailsTab.IncidentDetailsInfo CreateDefaultDetails(DateTime now)
+    {
+        var edtZone = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
+        DateTime edtNow = TimeZoneInfo.ConvertTime(DateTime.Now, edtZone);
+        TimeOnly edtTime = new TimeOnly(edtNow.Hour, edtNow.Minute);
+        return new(
             OccurrenceDescription: "Patient fell while walking",
             PatientDescription: "I slipped on the wet floor",
             FirstAidAdministered: true,
@@ -80,12 +86,13 @@ public static class IncidentDataFactory
             ResidentTransferred: false,
             CorrectiveAction: "Floor was dried immediately",
             PreventiveAction: "Increase monitoring during cleaning",
-            RelativeNotified: new DetailsTab.RelativeNotification("John Doe", "Son", "Nurse Smith", DateTime.Today, TimeOnly.FromDateTime(DateTime.Now)),
-            MDNotified: new DetailsTab.MDNotification("Dr. House", "Nurse Smith", DateTime.Today, TimeOnly.FromDateTime(DateTime.Now)),
+            RelativeNotified: new DetailsTab.RelativeNotification("John Doe", "Son", "Nurse Smith", edtNow.Date, edtTime),
+            MDNotified: new DetailsTab.MDNotification("Dr. House", "Nurse Smith", edtNow.Date, edtTime),
             MDOrder: "X-ray of the left knee",
             DiagnosticTests: "None",
             Witnesses: new List<string> { "Witness One", "Witness Two" }
     );
+    }
 
     private static StateTab.IncidentStateInfo CreateDefaultState() => new(
             Communication: new StateTab.CommunicationStatus(

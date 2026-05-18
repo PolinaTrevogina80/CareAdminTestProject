@@ -1,28 +1,33 @@
 ﻿using Microsoft.Extensions.Logging;
 using Microsoft.Playwright;
-using Microsoft.Testing.Platform.Logging;
 using Serilog;
+using static TestProject1.Common.AuthSetup;
 
 
 namespace TestProject1.Common
+{
+    public class BaseTest : PageTest
     {
-        public class BaseTest : PageTest
-        {
-            public readonly string StatePath = Path.Combine(TestContext.CurrentContext.TestDirectory, "state.json");
-            public virtual string BaseUrl => "https://qa.careadminplus.com";
-            protected Microsoft.Extensions.Logging.ILogger<BaseTest> Log;
+        public readonly string StatePath = Path.Combine(TestContext.CurrentContext.TestDirectory, "state.json");
+        public virtual string BaseUrl => "https://qa.careadminplus.com";
+        protected Microsoft.Extensions.Logging.ILogger<BaseTest> Log;
+        private static readonly object _refreshLock = new object();
+
+        // РЕШЕНИЕ ПРОБЛЕМЫ 1: Сразу создаем пустой список, чтобы он никогда не был null
+        private List<string> networkErrors = new List<string>();
+
+        // Эти поля больше не нужны на уровне класса, так как повторно использовать одну страницу в параллельных тестах нельзя
+        private IBrowser _sharedBrowser;
 
         public override BrowserNewContextOptions ContextOptions()
+        {
+            return new BrowserNewContextOptions
             {
-                return new BrowserNewContextOptions
-                {
-                    StorageStatePath = File.Exists(StatePath) ? StatePath : null,
-                    
-                    BaseURL = BaseUrl
-
-                };
-            }
-
+                StorageStatePath = File.Exists(StatePath) ? StatePath : null,
+                BaseURL = BaseUrl,
+                IgnoreHTTPSErrors = true
+            };
+        }
 
         [OneTimeSetUp]
         public async Task CreateAuthState()
@@ -37,118 +42,91 @@ namespace TestProject1.Common
             Log = loggerFactory.CreateLogger<BaseTest>();
 
             using var playwright = await Microsoft.Playwright.Playwright.CreateAsync();
-            await using var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = true });
+            var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = true });
+            _sharedBrowser = browser; 
 
-            var authContext = await browser.NewContextAsync(new BrowserNewContextOptions { BaseURL = BaseUrl });
+            var authContext = await browser.NewContextAsync(new BrowserNewContextOptions { BaseURL = BaseUrl, IgnoreHTTPSErrors = true });
             var authPage = await authContext.NewPageAsync();
 
-            var networkErrors = new List<string>();
             authPage.Response += (sender, response) =>
             {
                 if (response.Status >= 400)
                 {
-                    networkErrors.Add($"[HTTP {response.Status}] {response.Request.Method} {response.Url}");
+                    lock (networkErrors) { networkErrors.Add($"[HTTP {response.Status}] {response.Request.Method} {response.Url}"); }
                 }
             };
 
             try
             {
-                Log.LogInformation($"Переход на базовый URL: {BaseUrl}");
-                var mainResponse = await authPage.GotoAsync("/");
-
-                if (mainResponse == null || mainResponse.Status >= 400)
-                {
-                    var status = mainResponse?.Status.ToString() ?? "Unknown";
-                    throw new Exception($"Не удалось загрузить стартовую страницу. HTTP Status: {status}");
-                }
-
-                Log.LogDebug("Заполнение полей авторизации...");
-                await authPage.GetByPlaceholder("Username").FillAsync("polly@test.ts");
-                await authPage.GetByPlaceholder("Password").FillAsync("Qwert1@#");
-
-                Log.LogInformation("Нажатие кнопки SIGN IN...");
-                await authPage.GetByRole(AriaRole.Button, new() { Name = "SIGN IN" }).ClickAsync();
-
-                Log.LogDebug("Ожидание авторизации и проверка ошибок...");
-
-                // Инициализируем локатор для плашки ошибки на форме
-                var errorBanner = authPage.Locator(".mat-mdc-card, form, mat-error, .error-message, [role='alert']")
-                                          .Filter(new() { HasText = "error" })
-                                          .First;
-
-                // Создаем гонку задач: либо мы перейдем на /home, либо на экране отобразится ошибка UI
-                var urlTask = authPage.WaitForURLAsync(new System.Text.RegularExpressions.Regex(@"\/home$"), new() { Timeout = 15000 });
-                var errorTask = errorBanner.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 15000 });
-
-                var completedTask = await Task.WhenAny(urlTask, errorTask);
-
-                // Если первой сработала задача обнаружения ошибки на форме
-                if (completedTask == errorTask && await errorBanner.IsVisibleAsync())
-                {
-                    var errorText = await errorBanner.InnerTextAsync();
-                    var networkSummary = networkErrors.Any() ? string.Join(Environment.NewLine, networkErrors) : "Нет сетевых ошибок";
-
-                    throw new Exception($"Авторизация прервана. На форме отображена ошибка: '{errorText.Trim()}'.{Environment.NewLine}Лог сети:{Environment.NewLine}{networkSummary}");
-                }
-
-                // Если вышли по таймауту или упал urlTask — перепроверяем состояние в стандартном catch
-                await urlTask;
-
-                Log.LogDebug("Проверка видимости элемента 'My Tasks'...");
-                await Expect(authPage.GetByText("My Tasks")).ToBeVisibleAsync(new() { Timeout = 5000 });
-
-                Log.LogDebug("Ожидание появления токена в LocalStorage...");
-                await authPage.WaitForFunctionAsync(@"() => {
-            for (let i = 0; i < localStorage.length; i++) {
-                if (localStorage.getItem(localStorage.key(i)).includes('accessToken')) return true;
-            }
-            return false;
-        }", null, new PageWaitForFunctionOptions { Timeout = 10000 });
-
-                await authPage.WaitForLoadStateAsync(LoadState.NetworkIdle);
-                await authContext.StorageStateAsync(new() { Path = StatePath });
-                Log.LogInformation("Successful log in. Auth state saved.");
-            }
-            catch (Exception ex)
-            {
-                // Сюда попадают как ошибки из блока Task.WhenAny, так и любые таймауты
-                var networkSummary = networkErrors.Any() ? string.Join(Environment.NewLine, networkErrors) : "Лог сетевых запросов пуст";
-                Log.LogError(ex, $"[AUTH CRASH] Ошибка создания AuthState.{Environment.NewLine}Текущий URL: {authPage.Url}{Environment.NewLine}Сетевые ошибки:{Environment.NewLine}{networkSummary}");
-                throw;
+                // Вызываем логин для первичного создания файла
+                await CreateLogin(browser, authContext, authPage, networkErrors, BaseUrl, StatePath);
             }
             finally
             {
-                await authContext.CloseAsync();
-                await browser.CloseAsync();
+                // Закрываем технические окна ЗДЕСЬ, так как мы их тут и создали
+                if (authContext != null) await authContext.CloseAsync();
+                if (browser != null) await browser.CloseAsync();
             }
         }
 
+        [SetUp]
+        public async Task RefreshTokenIfNeeded()
+        {
+            bool needRefresh = false;
 
+            lock (_refreshLock)
+            {
+                if (File.Exists(StatePath))
+                {
+                    var lastWrite = File.GetLastWriteTime(StatePath);
+                    if ((DateTime.Now - lastWrite).TotalMinutes > 4)
+                    {
+                        needRefresh = true;
+                        // УБРАЛИ отсюда моментальный сдвиг времени изменения файла
+                    }
+                }
+                else
+                {
+                    needRefresh = true;
+                }
+            }
+
+            if (needRefresh)
+            {
+                Log.LogInformation("Токен устарел (прошло > 4 минут). Запускаем обновление сессии...");
+                lock (networkErrors) { networkErrors.Clear(); }
+
+                await Page.GotoAsync("/");
+
+                // Вызываем обновленный метод. Если он упадет — время файла не изменится,
+                // и следующий тест честно попробует перелогиниться заново, не ломая всю очередь
+                await CreateLogin(_sharedBrowser, Context, Page, networkErrors, BaseUrl, StatePath);
+
+                lock (_refreshLock)
+                {
+                    // Фиксируем успех: теперь файл официально обновлен
+                    File.SetLastWriteTime(StatePath, DateTime.Now);
+                }
+                Log.LogInformation("Сессия текущего теста успешно обновлена.");
+            }
+        }
         [TearDown]
         public async Task TearDown()
         {
             if (TestContext.CurrentContext.Result.Outcome.Status == NUnit.Framework.Interfaces.TestStatus.Failed)
             {
-                // Берем имя теста
                 var testName = TestContext.CurrentContext.Test.Name;
-
-                // Заменяем все плохие символы на подчеркивание
                 var safeName = string.Join("_", testName.Split(Path.GetInvalidFileNameChars()));
-                // Дополнительно убираем кавычки и запятые, которые NUnit добавляет от параметров
                 safeName = safeName.Replace("\"", "").Replace(",", "").Replace(" ", "_");
 
-                string fileName = TestContext.CurrentContext.Test.Name;
-                foreach (char c in Path.GetInvalidFileNameChars())
-                {
-                    safeName = safeName.Replace(c, '_');
-                }
+                // Формирования уникального пути для разных потоков:
+                var uniqueId = Guid.NewGuid().ToString("N").Substring(0, 5);
+                var path = Path.Combine(TestContext.CurrentContext.WorkDirectory, $"{safeName}_{uniqueId}_failed.png");
 
-                var path = Path.Combine(TestContext.CurrentContext.WorkDirectory, $"{safeName}_failed.png");
                 await Page.ScreenshotAsync(new() { Path = path });
                 TestContext.AddTestAttachment(path, "Screenshot on Failure");
                 Log.LogError($"Failure Screenshot is saved {path}");
             }
         }
     }
-    
 }

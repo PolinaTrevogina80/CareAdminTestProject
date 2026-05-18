@@ -116,7 +116,7 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
             //До сохранения
             //Проверяем, что Таба без красной точки
             await steps.VerifyRedDotTab(tab, false);
-            await steps.ClickSaveIncidentAsync();
+            await steps.ClickCreateIncidentAsync();
 
             //После сохранения
             //Проверяем, что Таба без красной точки
@@ -263,7 +263,7 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
             await steps.VerifyRedDotTab(tab, true);
 
             int max = 10;
-            int check = 5; // Граница, после которой точка должна пропасть
+            int check = 1; // Граница, после которой точка должна пропасть
 
             for (int i = 0; i < max; i++)
             {

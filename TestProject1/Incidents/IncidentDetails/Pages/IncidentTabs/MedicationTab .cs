@@ -1,6 +1,7 @@
 ﻿using CareAdminTestProject.Incidents.IncidentDetails.Pages.IncidentTabs;
 using Microsoft.Playwright;
 using Serilog;
+using static DetailsTab;
 
 public class MedicationTab : BaseIncidentTabs
 {
@@ -11,6 +12,7 @@ public class MedicationTab : BaseIncidentTabs
         string Frequency,
         string TimeReceived
     );
+
 
     public MedicationTab(IPage page) : base(page) { }
 
@@ -85,6 +87,60 @@ public class MedicationTab : BaseIncidentTabs
         }
 
         Log.Debug("[MEDICATION_TAB] Пустые строки успешно сгенерированы");
+    }
+
+    public async Task VerifyDataFieldsAsync(List<MedicationInfo> expected)
+    {
+        Log.Debug("[MEDICATION_TAB] Запуск гибкой верификации лекарств...");
+
+        // 1. Проверяем пустую таблицу
+        if (expected == null || expected.Count == 0)
+        {
+            var rowsCount = await Page.Locator(".medication-row.ng-star-inserted").CountAsync();
+            Assert.That(rowsCount, Is.EqualTo(0), "Ожидалось, что таблица лекарств будет пустой.");
+            return;
+        }
+
+        // 2. Ждем, пока строки отрендерятся на экране
+        var actualRows = Page.Locator(".medication-row.ng-star-inserted");
+        await actualRows.First.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5000 });
+
+        int actualCount = await actualRows.CountAsync();
+        Assert.That(actualCount, Is.EqualTo(expected.Count), "Количество строк в таблице лекарств на UI не совпадает с ожидаемым.");
+
+        // 3. Собираем все лекарства с интерфейса в реальном времени
+        var uiMedications = new List<MedicationInfo>();
+
+        for (int i = 0; i < actualCount; i++)
+        {
+            var row = actualRows.Nth(i);
+
+            var actualName = await row.Locator("input").Nth(0).InputValueAsync();
+            var actualDosage = await row.Locator("input").Nth(1).InputValueAsync();
+            var actualFrequency = await row.Locator("input").Nth(2).InputValueAsync();
+            var actualTimeReceived = await row.Locator("input").Nth(3).InputValueAsync();
+
+            uiMedications.Add(new MedicationInfo(
+                actualName.Trim(),
+                actualDosage.Trim(),
+                actualFrequency.Trim(),
+                actualTimeReceived.Trim()
+            ));
+        }
+
+        // 4. Сверяем два списка без учета порядка элементов (сортируем их по названию перед ассертом)
+        var sortedExpected = expected.OrderBy(m => m.Name).ToList();
+        var sortedUi = uiMedications.OrderBy(m => m.Name).ToList();
+
+        for (int i = 0; i < sortedExpected.Count; i++)
+        {
+            Assert.That(sortedUi[i].Name, Is.EqualTo(sortedExpected[i].Name), $"Ошибка в строке #{i + 1} после сортировки: не совпадает Name");
+            Assert.That(sortedUi[i].Dosage, Is.EqualTo(sortedExpected[i].Dosage), $"Ошибка в строке #{i + 1} после сортировки: не совпадает Dosage");
+            Assert.That(sortedUi[i].Frequency, Is.EqualTo(sortedExpected[i].Frequency), $"Ошибка в строке #{i + 1} после сортировки: не совпадает Frequency");
+            Assert.That(sortedUi[i].TimeReceived, Is.EqualTo(sortedExpected[i].TimeReceived), $"Ошибка в строке #{i + 1} после сортировки: не совпадает TimeReceived");
+        }
+
+        Log.Debug("[MEDICATION_TAB] Все лекарства успешно найдены и верифицированы вне зависимости от порядка строк.");
     }
 
 }

@@ -20,6 +20,9 @@ public class IncidentCreatePage : BaseIncidentTabs
     public AttachmentsTab Attachments { get; }
 
 
+    private readonly string _createButtonSelector = "button#create-incident"; // Ваш селектор
+
+
     public IncidentCreatePage(IPage page) : base(page)
     {
         _page = page;
@@ -46,11 +49,17 @@ public class IncidentCreatePage : BaseIncidentTabs
 
     public async Task<ResidentInfo> SelectResidentAsyncByInd(int index, int maxRetries = 3)
     {
-        var residentField = _page.Locator("mat-select, .mat-mdc-select").First;
-        var dropdownPanel = _page.Locator(".mat-mdc-select-panel, .mat-select-panel").First;
+        // Комбинированный локатор: ищет контейнер и в пустом, и в заполненном состоянии
+        var lookupContainer = _page.Locator("cad-lookup-select, rnt-resident-lookup-select").First;
 
-        // Ждем, пока прекратятся фоновые сетевые запросы Angular, чтобы UI не тормозил
-        await _page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+        // Находим строго активный mat-select внутри текущего контейнера
+        var selectContainer = lookupContainer.Locator("mat-select:not(.mat-select-disabled)").First;
+        var arrowTrigger = selectContainer.Locator(".mat-mdc-select-arrow-wrapper, .mat-select-arrow-wrapper");
+        var dropdownPanel = _page.Locator(".cdk-overlay-container");
+
+        // Ждем, пока селектор физически появится в DOM и станет видимым
+        await selectContainer.ScrollIntoViewIfNeededAsync();
+        await selectContainer.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 10000 });
 
         for (int attempt = 1; attempt <= maxRetries; attempt++)
         {
@@ -58,43 +67,40 @@ public class IncidentCreatePage : BaseIncidentTabs
 
             try
             {
-                await residentField.ScrollIntoViewIfNeededAsync();
-                await residentField.FocusAsync();
-                await Task.Delay(300); // Даем фокусу зафиксироваться
-                await _page.Keyboard.PressAsync("Space");
+                var isExpanded = await selectContainer.GetAttributeAsync("aria-expanded");
+                if (isExpanded != "true")
+                {
+                    await arrowTrigger.ClickAsync(new() { Force = true });
+                }
 
-                // Увеличиваем таймаут ожидания панели до 8 секунд
-                await dropdownPanel.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 8000 });
-                await Task.Delay(500);
+                await dropdownPanel.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5000 });
+                var options = dropdownPanel.Locator("mat-option, mat-mdc-option");
+                await options.First.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5000 });
 
-                var targetOption = dropdownPanel.GetByRole(AriaRole.Option).Nth(index);
-                await targetOption.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5000 });
-
+                var targetOption = options.Nth(index);
                 var fullText = await targetOption.InnerTextAsync();
                 var parts = fullText.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(p => p.Trim()).ToArray();
                 var expectedName = parts.FirstOrDefault() ?? "";
 
-                Log.Debug($"Выбираем резидента '{expectedName}' стрелками...");
+                Log.Debug($"Кликаем по резиденту '{expectedName}'...");
+                await targetOption.ClickAsync(new() { Force = true });
 
-                for (int i = 0; i < index; i++)
-                {
-                    await _page.Keyboard.PressAsync("ArrowDown");
-                    await Task.Delay(150);
-                }
-
-                await _page.Keyboard.PressAsync("Enter");
+                // Ждем закрытия шторки дропдауна
                 await dropdownPanel.WaitForAsync(new() { State = WaitForSelectorState.Hidden, Timeout = 5000 });
 
-                await _page.Keyboard.PressAsync("Tab");
+                // ЖЕСТКИЙ ТАЙМАУТ: Даем Angular время полностью перестроить DOM и подгрузить карточку
+                Log.Debug("Ожидаем завершения анимации и рендеринга Angular...");
+                await Task.Delay(2000);
 
-                Log.Debug("Проверяем появление текстовых блоков MRN и Gender на странице...");
+                Log.Debug("Ожидаем появление карточки резидента с MRN и Gender...");
 
-                // Ищем текст MRN и Gender глобально по всей странице, так как они находятся выше тега <form>
-                await Assertions.Expect(_page.Locator("body")).ToContainTextAsync("MRN", new() { Timeout = 10000 });
-                await Assertions.Expect(_page.Locator("body")).ToContainTextAsync("Gender", new() { Timeout = 3000 });
-                await Assertions.Expect(_page.Locator("body")).ToContainTextAsync(expectedName, new() { Timeout = 3000 });
+                // Ищем элементы на странице независимо, без привязки к старому lookupContainer
+                var mrnField = _page.Locator("cad-label-value-field[label='MRN']").First;
+                var genderField = _page.Locator("cad-label-value-field[label='Gender']").First;
 
-                Log.Debug("Форма успешно подгрузила данные резидента!");
+                // Проверяем видимость новых элементов формы инцидента
+                await Assertions.Expect(mrnField).ToBeVisibleAsync(new() { Timeout = 10000 });
+                await Assertions.Expect(genderField).ToBeVisibleAsync(new() { Timeout = 3000 });
 
                 return new ResidentInfo(
                     Name: expectedName,
@@ -106,14 +112,19 @@ public class IncidentCreatePage : BaseIncidentTabs
             {
                 Log.Warning($"Попытка {attempt} не удалась. Ошибка: {ex.Message}");
 
-                await _page.Keyboard.PressAsync("Escape");
+                if (await dropdownPanel.IsVisibleAsync())
+                {
+                    await _page.Keyboard.PressAsync("Escape");
+                    await dropdownPanel.WaitForAsync(new() { State = WaitForSelectorState.Hidden, Timeout = 3000 });
+                }
+
                 await Task.Delay(2000);
             }
         }
 
         throw new Exception($"Не удалось подтвердить выбор резидента и загрузку его метаданных за {maxRetries} попыток.");
-    }
 
+    }
 
     public async Task ClickTabAsync(string tabName, LocatorClickOptions options = null)
     {
@@ -136,6 +147,11 @@ public class IncidentCreatePage : BaseIncidentTabs
 
         Log.Information($"Текущий URL после создания: {_page.Url}");
 
+    }
+
+    public async Task<ILocator> GetCreateIncidentButtonLocator()
+    {
+        return _page.GetByRole(AriaRole.Button, new() { Name = "Create" });
     }
 
     public async Task ClickSaveIncident()

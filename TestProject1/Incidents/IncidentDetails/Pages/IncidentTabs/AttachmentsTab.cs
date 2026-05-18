@@ -1,6 +1,7 @@
 ﻿using CareAdminTestProject.Incidents.IncidentDetails.Pages.IncidentTabs;
 using Microsoft.Playwright;
 using Serilog;
+using System.IO;
 
 public class AttachmentsTab : BaseIncidentTabs
 {
@@ -73,40 +74,24 @@ public class AttachmentsTab : BaseIncidentTabs
     {
         Log.Debug($"Вызван метод для применения одной категории '{categoryName}' ко всем страницам.");
 
-        // Быстро определяем общее число страниц, чтобы построить корректный список
-        var dialog = Page.Locator("mat-dialog-container, cad-incident-assign-pdf-to-category").First;
-        await dialog.WaitForAsync();
+        // Оборачиваем одну категорию в список из одного элемента
+        IReadOnlyList<string> categoryNames = new List<string> { categoryName };
 
-        var paginationElement = dialog.Locator(".pagination-wrapper, .page-configuration, .pagination").Filter(new() { Has = Page.Locator("mat-icon") }).First;
-        var paginationText = await paginationElement.InnerTextAsync();
-        var match = System.Text.RegularExpressions.Regex.Match(paginationText, @"of\s+(\d+)");
-        int totalPages = match.Success ? int.Parse(match.Groups[1].Value) : 1;
-
-        // Генерируем список, где имя категории дублируется для каждой страницы document
-        IReadOnlyList<string> categoryNames = Enumerable.Repeat(categoryName, totalPages).ToList();
-
-        // Вызываем единый обработчик
-        await AssignCategoriesInternalAsync(categoryNames, notes);
+        // Передаем в перегрузку, которая умеет работать со списками
+        await AssignCategoriesToAllPagesAsync(categoryNames, notes);
     }
 
     public async Task AssignCategoriesToAllPagesAsync(IReadOnlyList<string> categoryNames, string? notes = null)
     {
-        Log.Debug($"Вызван метод для полистного распределения списка из {categoryNames.Count} категорий.");
+        Log.Debug("Начинаем процесс полистного присвоения списка категорий.");
 
-        // Передаем список напрямую в единый обработчик
-        await AssignCategoriesInternalAsync(categoryNames, notes);
-    }
-
-    private async Task AssignCategoriesInternalAsync(IReadOnlyList<string> categoryNames, string? notes = null)
-    {
         // 1. Находим контейнер попапа
-        var dialog = Page.Locator("mat-dialog-container, cad-incident-assign-pdf-to-category").First;
+        var dialog = Page.Locator(".incident-assign-pdf-to-category").First;
         await dialog.WaitForAsync();
         Log.Debug("Попап Assign Pages найден и отображен.");
 
-        // 2. Ищем текст пагинации для определения количества страниц
-        var paginationElement = dialog.Locator(".pagination-wrapper, .page-configuration, .pagination")
-            .Filter(new() { Has = Page.Locator("mat-icon") }).First;
+        // 2. Ищем текст пагинации для определения количества страниц в PDF
+        var paginationElement = dialog.Locator(".pagination-wrapper, .page-configuration, .pagination").Filter(new() { Has = Page.Locator("mat-icon") }).First;
         var paginationText = await paginationElement.InnerTextAsync();
         Log.Debug($"Текст пагинации извлечен: '{paginationText}'");
 
@@ -114,37 +99,45 @@ public class AttachmentsTab : BaseIncidentTabs
         int totalPages = match.Success ? int.Parse(match.Groups[1].Value) : 1;
         Log.Debug($"Определено общее количество страниц: {totalPages}");
 
-        // Защита от выхода за границы переданной коллекции
-        int iterationsCount = Math.Min(totalPages, categoryNames.Count);
+        // На всякий случай проверяем, что переданный список категорий покрывает страницы документа
+        int iterationsCount = totalPages;
 
         for (int i = 1; i <= iterationsCount; i++)
         {
             Log.Debug($"--- Обработка страницы {i} из {totalPages} ---");
 
-            // Очищаем строку от случайных пробелов по краям (решает проблему с Exact = true)
-            string currentCategory = categoryNames[i - 1]?.Trim() ?? string.Empty;
+            // Берем элемент по индексу, а если он один — он будет дублироваться для всех страниц
+            string currentCategory = (i - 1 < categoryNames.Count)
+                ? categoryNames[i - 1]
+                : categoryNames[categoryNames.Count - 1];
 
-            // 3. Поиск и клик по селекту (БЕЗ Force: true для стабильности Angular)
-            var dropdown = dialog.Locator("mat-select, cad-lookup-select").First;
+            // 3. Поиск и клик по селекту
+            var dropdown = dialog.Locator(".mat-mdc-select-value").First;
             await dropdown.ScrollIntoViewIfNeededAsync();
             await dropdown.WaitForAsync(new() { State = WaitForSelectorState.Visible });
 
-            Log.Debug($"Кликаем по выпадающему списку для выбора '{currentCategory}'...");
-            await dropdown.ClickAsync();
+            Log.Debug("Ждем 1.5 секунды для гарантированной привязки Angular Event Listeners...");
+            await Page.WaitForTimeoutAsync(1500);
 
-            // 4. Выбор опции внутри оверлея
+            Log.Debug("Фокусируемся на селекте и кликаем...");
+            await dropdown.FocusAsync();
+            await dropdown.ClickAsync(new() { Force = true });
+
+            // 4. Выбор опции
+            // Резервная копия на случай, если клик проигнорирован — жмем Space для открытия
+            Log.Debug("Проверяем, открылся ли список, если нет — шлем Space...");
             var overlay = Page.Locator(".cdk-overlay-container");
+            if (!await overlay.Locator("mat-option").First.IsVisibleAsync())
+            {
+                await Page.Keyboard.PressAsync("Space");
+            }
+
             await Assertions.Expect(overlay).ToBeVisibleAsync();
 
-            // Ищем опцию. Если Exact = true продолжит падать, можно заменить на Exact = false
-            var option = overlay.Locator("mat-option").GetByText(currentCategory, new() { Exact = true });
-            await option.WaitForAsync(new() { State = WaitForSelectorState.Visible });
+            var option = overlay.Locator("mat-option").GetByText(currentCategory, new() { Exact = false });
             await option.ClickAsync();
 
             Log.Debug($"Категория '{currentCategory}' успешно выбрана для страницы {i}");
-
-            // Ждем, пока оверлей полностью закроется, чтобы не перегружать DOM Angular
-            await Assertions.Expect(overlay.Locator("mat-option")).ToHaveCountAsync(0);
 
             // 5. Обработка категории Other для текущей страницы
             if (currentCategory.Equals("Other", StringComparison.OrdinalIgnoreCase))
@@ -156,11 +149,12 @@ public class AttachmentsTab : BaseIncidentTabs
                 Log.Debug($"Поле Notes заполнено текстом: '{notesToFill}'");
             }
 
-            // 6. Переход к следующей странице (Рабочий локатор из div.pagination-button)
+            // 6. Переход к следующей странице
             if (i < totalPages)
             {
                 Log.Debug("Нажимаем стрелку 'вправо' для перехода к следующей странице.");
 
+                // Ищем div с классом pagination-button, внутри которого есть иконка chevron_right
                 var nextButton = dialog.Locator("div.pagination-button")
                     .Filter(new() { HasText = "keyboard_arrow_right" })
                     .First;
@@ -168,7 +162,7 @@ public class AttachmentsTab : BaseIncidentTabs
                 await nextButton.ScrollIntoViewIfNeededAsync();
                 await nextButton.ClickAsync();
 
-                // Жесткое ожидание обновления UI
+                // Ждем, пока номер страницы на UI обновится (например, станет i + 1)
                 var expectedPageText = $"{i + 1} of {totalPages}";
                 await Assertions.Expect(paginationElement).ToContainTextAsync(expectedPageText);
                 Log.Debug($"Успешно перешли на страницу {i + 1}.");
@@ -183,7 +177,7 @@ public class AttachmentsTab : BaseIncidentTabs
         Log.Debug("Кнопка 'Assign Pages' нажата.");
 
         await dialog.WaitForAsync(new() { State = WaitForSelectorState.Hidden });
-        Log.Debug("Попап закрыт, процесс успешно завершен.");
+        Log.Debug("Попап закрыт, метод работы со списком завершен успешно.");
     }
 
     public async Task VerifyAttachmentIsDisplayedAsync(string category)

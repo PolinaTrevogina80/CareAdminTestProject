@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Playwright;
 using TestProject1.Common;
 using static IncidentDataFactory;
+using static System.Net.Mime.MediaTypeNames;
 
 [TestFixture]
 public class BaseIncidentTests : BaseTest
@@ -15,8 +16,6 @@ public class BaseIncidentTests : BaseTest
     [SetUp]
     public async Task Setup()
     {
-        // Если в базе тоже есть [SetUp], вызываем его явно (если это override)
-        // await base.Setup(); 
         Log.LogDebug($"Make Setup, switch to Carrilon");
 
         await EnsureFacilitySelected("Carillon");
@@ -146,6 +145,7 @@ public class BaseIncidentTests : BaseTest
 
         }
     }
+
 
     private async Task<string> GetCurrentSelectionAsync()
     {

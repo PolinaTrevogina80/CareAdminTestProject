@@ -26,7 +26,9 @@ using static System.Net.WebRequestMethods;
             public IncidentCreatePage CreatePage => _createPage;
             string fileName;
 
-            public IncidentDetailsSteps(IPage page)
+        public IncidentGeneralInfo CapturedGeneralData { get; private set; }
+
+        public IncidentDetailsSteps(IPage page)
             {
                 _page = page;
                 _createPage = new IncidentCreatePage(page);
@@ -49,6 +51,34 @@ using static System.Net.WebRequestMethods;
                 Log.Debug($"Resident is selected {info.Name}");
                 return info;
             }
+
+        public async Task<string> GetCurrentUrlAsync()
+        {
+            return _page.Url;
+        }
+
+        public async Task GoBackBrowserAsync()
+        {
+            Log.Debug("Нажимаем браузерную кнопку 'Назад' для проверки Change Detection...");
+
+            // Эмулирует нажатие стрелки назад в браузере
+            await _page.GoBackAsync();
+        }
+
+        public async Task LeavePageViaMenuAsync()
+        {
+            Log.Debug("Кликаем по пункту меню 'Tracker' для ухода со страницы...");
+
+            // Находим ссылку 'Tracker' внутри боковой панели Accident/Incident
+            await _page.Locator("a:has-text('Tracker'), .sidebar-link:has-text('Tracker')").First.ClickAsync();
+        }
+
+        public async Task ReloadPageAndNavigateAsync(string url)
+        {
+            await _page.GotoAsync(url);
+            await _page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+        }
+
         public async Task SwitchToTab(string tabName)
         {
             Log.Debug($"Переключаемся на вкладку: {tabName}");
@@ -81,9 +111,97 @@ using static System.Net.WebRequestMethods;
             Log.Debug($"Вкладка {tabName} готова к работе!");
         }
 
+        public async Task FillAndSaveEntireIncident(IncidentTestData data)
+        {
+            await ClearGeneralForm();
+            await FillGeneralTabAsync(data);
+            await ClickCreateIncidentAsync();
+            await FillDetailsTabAsync(data);
+            await FillStateTabAsync(data);
+            await FillMedicationTabAsync(data);
+            await FillRNFormTabAsync(data);
+            await FillSummaryTabAsync(data);
+            await ClickSaveIncidentAsync();
+            await SignSummaryAndVerifyAsync();
+            await ClickSaveIncidentAsync(true);
+            await UploadAttachmentTabAsync("Accident Report");
+        }
+
+        public Task SignDNS()
+        {
+            return _createPage.SignAsRoleAsync(RoleToSign.DNS);
+        }
+
+        public Task SignMD()
+        {
+            return _createPage.SignAsRoleAsync(RoleToSign.MD);
+        }
+
+        public Task SignAdministrator()
+        {
+            return _createPage.SignAsRoleAsync(RoleToSign.Administrator);
+        }
+
+        public async Task AssertIncidentIsLockedAsync()
+        {
+            Log.Debug("Проверяем, что инцидент успешно заблокирован после всех подписей...");
+
+            // Ищем верхний баннер блокировки
+            var lockBanner = _page.Locator("body");
+            await Assertions.Expect(lockBanner).ToContainTextAsync("Incident Locked", new() { Timeout = 5000 });
+
+            Log.Debug("[SUCCESS] Инцидент заблокирован, все подписи сохранены.");
+        }
+
+        public async Task AssertIncidentIsUnlockedAsync()
+        {
+            Log.Debug("Проверяем состояние тумблера блокировки (должен быть разблокирован)...");
+
+            // Смотрим строго на кнопку внутри mat-slide-toggle
+            var toggleButton = _page.Locator("mat-slide-toggle button[role='switch']").First;
+
+            // Проверяем, что атрибут равен "false"
+            await Assertions.Expect(toggleButton).ToHaveAttributeAsync("aria-checked", "false", new() { Timeout = 5000 });
+
+            Log.Debug("[SUCCESS] Подтверждено атрибутом Angular: инцидент разблокирован.");
+        }
+
+        /// Устанавливает состояние блокировки инцидента (true - заблокировать, false - разблокировать)
+        public async Task SetIncidentLockStateAsync(bool shouldBeLocked)
+        {
+            Log.Debug($"[Блокировка] Переводим форму в состояние 'Заблокировано = {shouldBeLocked}'...");
+
+            // Точечный локатор переключателя
+            var toggleButton = _page.Locator("mat-slide-toggle button[role='switch']").First;
+            await toggleButton.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5000 });
+
+            // Проверяем текущий статус ползунка
+            var ariaChecked = await toggleButton.GetAttributeAsync("aria-checked");
+            bool isCurrentlyLocked = ariaChecked == "true";
+
+            if (isCurrentlyLocked == shouldBeLocked)
+            {
+                Log.Debug($"Форма уже в нужном состоянии (Locked = {isCurrentlyLocked}). Клик пропущен.");
+                return;
+            }
+
+            Log.Debug($"Кликаем по тумблеру блокировки. Текущее: {isCurrentlyLocked}, Целевое: {shouldBeLocked}");
+
+            // Кликаем по самому элементу кнопки внутри mat-slide-toggle
+            await toggleButton.ClickAsync(new() { Force = true });
+
+            // Ждем изменения Angular-атрибута кнопки (true/false) — это главный индикатор переключения
+            string expectedValue = shouldBeLocked ? "true" : "false";
+            await Assertions.Expect(toggleButton).ToHaveAttributeAsync("aria-checked", expectedValue, new() { Timeout = 7000 });
+
+            // Небольшая пауза для завершения анимации стилей на странице
+            await Task.Delay(1000);
+            Log.Debug("[Блокировка] Состояние тумблера успешно изменилось в DOM.");
+        }
+
         public async Task FillGeneralTabAsync(IncidentTestData data)
             {
-                await _createPage.General.FillBasicInfoAsync(data.General);
+                CapturedGeneralData = await _createPage.General.FillBasicInfoAsync(data.General);
                 await _page.MakeScreenshotAsync("General_Filled");
                 Log.Information("General Tab filled");
             }
@@ -196,6 +314,110 @@ using static System.Net.WebRequestMethods;
                 await _page.MakeScreenshotAsync("Attachment_Filled");
             }
             Log.Information($"Multi-page attachment file '{fileToUpload}' attached successfully.");
+        }
+
+        public async Task VerifyCreateButtonIsDisabledAsync()
+        {
+            // Получаем локатор кнопки через ваш класс страницы
+            var createButton = await _createPage.GetCreateIncidentButtonLocator();
+
+            // Проверяем стандартный HTML-атрибут disabled
+            await Assertions.Expect(createButton).ToBeDisabledAsync();
+        }
+
+
+        public async Task VerifyDataRetainedAsync(object tabData)
+        {
+            switch (tabData)
+            {
+                case IncidentGeneralInfo generalData:
+                    // Вызываем проверку у обработчика вкладки General
+                    await _createPage.ClickTabAsync("General");
+                    await _createPage.General.VerifyDataFieldsAsync(generalData);
+                    Log.Debug("Tab General checked and is OK");
+                    break;
+
+                case IncidentDetailsInfo detailsData:
+                    // Вызываем проверку у обработчика вкладки Details
+                    await _createPage.ClickTabAsync("Details");
+                    await _createPage.Details.VerifyDataFieldsAsync(detailsData);
+                    Log.Debug("Tab Details checked and is OK");
+                    break;
+
+                case IncidentStateInfo stateData:
+                    await _createPage.ClickTabAsync("State");
+                    await _createPage.State.VerifyDataFieldsAsync(stateData);
+                    Log.Debug("Tab State checked and is OK");
+                    break;
+
+                case List<MedicationInfo> medicationsList:
+                    await _createPage.ClickTabAsync("Medication");
+                    await _createPage.Medication.VerifyDataFieldsAsync(medicationsList);
+                    Log.Debug("Tab Medications checked and is OK");
+                    break; 
+
+                case IncidentSummaryInfo summaryData:
+                    await _createPage.ClickTabAsync("Summary");
+                    await _createPage.Summary.VerifyDataFieldsAsync(summaryData);
+                    Log.Debug("Tab Summary checked and is OK");
+                    break;
+
+                case RNSupervisorTab.RNSupervisorTabInfo rnFormData:
+                    await _createPage.ClickTabAsync("RN Supervisor Investigation Form");
+                    await _createPage.RNSupervisor.VerifyDataFieldsAsync(rnFormData);
+                    Log.Debug("Tab RN Supervisor Investigation Form checked and is OK");
+                    break;
+
+                default:
+                    throw new ArgumentException($"Универсальная проверка не настроена для типа данных: {tabData.GetType().Name}");
+            }
+        }
+
+
+        public async Task ModifySingleFieldOnTabAsync(string tabName)
+        {
+            switch (tabName)
+            {
+                case "General":
+                    await _createPage.General.GetFieldByLabel("SBARSummary").TypeAsync("Changed field");
+                    break;
+                case "Details":
+                    await _createPage.Details.GetFieldByLabel("Describe Occurrence").TypeAsync("Changed field");
+                    break;
+                case "State":
+                    // Для чекбоксов Angular Material/Kendo изменение состояния тоже триггерит dirty
+                    await _page.Locator("mat-checkbox input, kendo-switch input").First.ClickAsync();
+                    break;
+                case "Medication":
+                    var row = _page.Locator(".medication-row.ng-star-inserted").Nth(0);
+                    await row.Locator("input").Nth(1).FillAsync("1000");
+                    break;
+                case "RN Supervisor Investigation Form":
+                    await _page.Locator("kendo-timepicker[name='answerTime'] input:visible").First.ClickAsync();
+                    // Просто фокус и изменение времени
+                    await _page.Keyboard.PressAsync("ArrowUp");
+                    break;
+                case "Summary":
+                    await _createPage.Summary.SelectQuestionRadioAsync("Based upon the collection and review of all attached information, the following conclusion has been reached:", "Undetermined");
+
+                    break;
+            }
+        }
+
+        public async Task VerifyUnsavedChangesAlertVisibleAsync(string sourceTabName)
+        {
+            Log.Debug($"[VALIDATION] Проверяем появление кастомной модалки Change Detection для вкладки: {sourceTabName}");
+
+            // 1. Ищем текст заголовка или тела кастомного окна
+            var customModalText = _page.GetByText("Do you want to leave this page?");
+
+            // 2. Ожидаем появление модалки на UI
+            await customModalText.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 3000 });
+
+            // 3. Делаем ассерт
+            bool isModalVisible = await customModalText.IsVisibleAsync();
+            Assert.That(isModalVisible, Is.True,
+                $"Кастомное предупреждение о несохраненных данных НЕ появилось при попытке ухода с вкладки '{sourceTabName}'!");
         }
 
         public async Task ClickCreateIncidentAsync()
@@ -432,27 +654,20 @@ using static System.Net.WebRequestMethods;
         public async Task FillRNFormTabWithTabCheckAsync(IncidentTestData data)
         {
             var tab = "RN Supervisor Investigation Form";
-            // 1. Запускаем заполнение всей формы (таск начинает выполняться)
-            var fillTask = _createPage.RNSupervisor.FillQuestionsAsync(data.RNSupervisor);
 
-            // 2. Параллельно запускаем ожидание 27-го шага и проверку точки
-            var checkDotTask = Task.Run(async () =>
+            // Просто вызываем метод заполнения, но передаем туда лямбду-проверку, 
+            // которая сработает на нужном шаге внутри одного потока Playwright!
+            await _createPage.RNSupervisor.FillQuestionsAsync(data.RNSupervisor, async (currentStep) =>
             {
-                // Ждем, пока локатор пагинации на странице покажет, что мы дошли до 27 шага
-                var pagination = _page.Locator("div.pagination").Last;
-
-                // Используем стандартный ассершн Playwright для ожидания текста внутри процесса заполнения
-                await Assertions.Expect(pagination).ToContainTextAsync("27 of 28", new() { Timeout = 30000 });
-
-                // Как только 27 шаг отобразился — проверяем, что красная точка всё еще на месте
-                await VerifyRedDotTab(tab, shouldBeVisible: true);
-                Log.Debug("Verified: Red Dot is still visible on step 27.");
+                if (currentStep == 27)
+                {
+                    // Как только заполнился 27 шаг — проверяем, что красная точка всё еще на месте
+                    await VerifyRedDotTab(tab, shouldBeVisible: true);
+                    Log.Debug("Verified inside flow: Red Dot is still visible on step 27.");
+                }
             });
 
-            // 3. Ждем завершения обоих процессов
-            // Если упадет либо заполнение, либо проверка точки на 27 шаге — тест покажет ошибку
-            await Task.WhenAll(fillTask, checkDotTask);
-            Log.Information("RN Supervisor Investigation Form Tab filled with background validation");
+            Log.Information("RN Supervisor Investigation Form Tab filled with inline validation");
         }
 
         public async Task VerifyRedDotTab(string tabName, bool shouldBeVisible = true)

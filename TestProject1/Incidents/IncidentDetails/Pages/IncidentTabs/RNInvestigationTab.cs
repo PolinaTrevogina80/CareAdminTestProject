@@ -1,8 +1,10 @@
 ﻿using Microsoft.Playwright;
+using Serilog;
 using System.Globalization;
 using System.Text.RegularExpressions;
-using static Microsoft.Playwright.Assertions;
 using static CareAdminTestProject.Incidents.IncidentDetails.Pages.IncidentTabs.RNSupervisorTab.RNSupervisorTabInfo;
+using static DetailsTab;
+using static Microsoft.Playwright.Assertions;
 
 namespace CareAdminTestProject.Incidents.IncidentDetails.Pages.IncidentTabs;
 
@@ -95,10 +97,9 @@ public class RNSupervisorTab : BaseIncidentTabs
     /// </summary>
     private async Task FillFormStepAsync(int stepNumber, Func<Task> fillAction)
     {
-        // Ждем индикатор страницы (например, "1 of 28")
         var pagination = Page.Locator("div.pagination").Last;
 
-        // Ждем, когда в этом блоке появится нужный текст (например, "1 of")
+        // Ждем, когда страница станет именно той, которую мы заполняем
         await Expect(pagination).ToContainTextAsync($"{stepNumber} of 28", new() { Timeout = 10000 });
 
         // Выполняем логику заполнения полей
@@ -106,6 +107,12 @@ public class RNSupervisorTab : BaseIncidentTabs
 
         // Переходим к следующему шагу
         await GoToNextStepAsync();
+
+        // ФИКС: Ждем исчезновения текста ТОЛЬКО если это НЕ последняя страница
+        if (stepNumber < 28)
+        {
+            await Expect(pagination).Not.ToContainTextAsync($"{stepNumber} of 28", new() { Timeout = 3000 });
+        }
     }
 
     public async Task SelectLocationsAsync(IReadOnlyList<string> locations)
@@ -152,7 +159,140 @@ public class RNSupervisorTab : BaseIncidentTabs
         await nextButton.WaitForAsync(new() { State = WaitForSelectorState.Visible });
         await nextButton.ClickAsync();
 
-        // Ждем завершения анимации перехода слайда в Kendo/Angular
+        // Завершение анимации перехода слайда в Kendo/Angular
+        // Без этого клики могут регистрироваться браузером дважды или проглатываться
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle); // Ждем, если идут микро-запросы
+        await Task.Delay(250); // Даем четверть секунды на завершение CSS-транзишна слайда
     }
+
+    public async Task<IReadOnlyList<string>> GetSelectedLocationsAsync()
+    {
+        // 1. Находим контейнер со всеми выбранными элементами
+        var chipsContainer = Page.Locator("div.cad-chips-wrapper, div.selected-items").First;
+        await chipsContainer.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5000 });
+
+        // 2. Небольшая задержка для завершения рендеринга Angular
+        await Page.WaitForTimeoutAsync(200);
+
+        // 3. Берем именно span с текстом внутри каждого выбранного элемента
+        var locationSpans = chipsContainer.Locator("div.selected-item span");
+
+        var cleanLocations = new List<string>();
+        int count = await locationSpans.CountAsync();
+
+        for (int i = 0; i < count; i++)
+        {
+            // Извлекаем чистый текст напрямую из тега span
+            string rawText = await locationSpans.Nth(i).EvaluateAsync<string>("el => el.textContent") ?? "";
+
+            string cleanText = rawText.Trim();
+
+            if (!string.IsNullOrEmpty(cleanText))
+            {
+                cleanLocations.Add(cleanText);
+            }
+        }
+
+        return cleanLocations;
+    }
+
+    // Проверка того, какая кнопка-тоггл (YES/NO) сейчас активна
+    public async Task<string> GetSelectedToggleValueAsync()
+    {
+        // Находим mat-button-toggle, у которого присутствует класс активности (например, mat-button-toggle-checked)
+        var checkedToggle = Page.Locator("mat-button-toggle.mat-button-toggle-checked, mat-button-toggle[checked='true']");
+        if (await checkedToggle.CountAsync() > 0)
+        {
+            return await checkedToggle.InnerTextAsync();
+        }
+        return string.Empty;
+    }
+
+
+    public async Task VerifyDataFieldsAsync(RNSupervisorTabInfo expected)
+    {
+
+        Log.Debug("[RN_SUPERVISOR_TAB] Запуск пошаговой верификации формы...");
+
+        // 0. Проверяем выбранные локации на стартовом экране
+        if (expected.Locations != null && expected.Locations.Any())
+        {
+            var actualLocations = await GetSelectedLocationsAsync();
+
+            foreach (var expectedLocation in expected.Locations)
+            {
+                // Проверяем, что ХОТЯ БЫ ОДИН элемент на UI частично содержит имя нашей локации
+                bool isFound = actualLocations.Any(act => act.Contains(expectedLocation.Trim(), StringComparison.OrdinalIgnoreCase));
+
+                Assert.That(isFound, Is.True,
+                    $"Локация '{expectedLocation}' не найдена среди выбранных на UI. Доступно на UI: {string.Join(", ", actualLocations)}");
+            }
+        }
+
+        // Шаг 1: Время последнего визита
+        await VerifyFormStepAsync(1, async () =>
+        {
+            // Проверяем заполненное время через InputValueAsync
+            var actualTime = await Page.Locator("kendo-timepicker[name='answerTime'] input:visible").InputValueAsync();
+            string expectedTimeStr = expected.LastSeen.Time.ToString("hh:mm tt", System.Globalization.CultureInfo.InvariantCulture);
+            Assert.That(actualTime, Is.EqualTo(expectedTimeStr), "Шаг 1: Время последнего визита не совпадает.");
+
+            // Проверяем детальное описание
+            var actualDetails = await Page.GetByPlaceholder("Enter details").InputValueAsync();
+            Assert.That(actualDetails, Is.EqualTo(expected.LastSeen.Details), "Шаг 1: Детали не совпадают.");
+        });
+
+        // Шаг 2: Детальное описание происшествия
+        await VerifyFormStepAsync(2, async () =>
+        {
+            var actualDetails = await Page.GetByPlaceholder("Enter details").InputValueAsync();
+            Assert.That(actualDetails, Is.EqualTo(expected.DescribeExactly.Details), "Шаг 2: Детальное описание не совпадает.");
+        });
+
+        // Шаги 3-28: Циклический перебор динамических вопросов (YES/NO + Комментарии)
+        for (int i = 0; i < expected.Questions.Count; i++)
+        {
+            var currentQuestion = expected.Questions[i];
+            int stepNumber = i + 3; // По логике заполнения, вопросы начинаются со страницы 3
+
+            await VerifyFormStepAsync(stepNumber, async () =>
+            {
+                // 1. Проверяем выбранное состояние тоггла (YES или NO)
+                string expectedButtonName = currentQuestion.Answer ? "YES" : "NO";
+                string actualButtonName = await GetSelectedToggleValueAsync();
+
+                Assert.That(actualButtonName.ToUpper(), Is.EqualTo(expectedButtonName),
+                    $"Шаг {stepNumber}: Неверный выбор переключателя.");
+
+                // 2. Если в черновике был сохранен комментарий, сверяем его текстовое поле
+                if (!string.IsNullOrEmpty(currentQuestion.Comments))
+                {
+                    var actualComment = await Page.GetByPlaceholder("Enter comments").InputValueAsync();
+                    Assert.That(actualComment, Is.EqualTo(currentQuestion.Comments),
+                        $"Шаг {stepNumber}: Комментарий не совпадает.");
+                }
+            });
+        }
+
+        Log.Debug("[RN_SUPERVISOR_TAB] Пошаговая верификация визарда успешно завершена.");
+    }
+
+    /// <summary>
+    /// Обертка для обработки шага верификации: контролирует пагинацию, выполняет проверки на текущем слайде и жмет "Далее"
+    /// </summary>
+    private async Task VerifyFormStepAsync(int stepNumber, Func<Task> verifyAction)
+    {
+        var pagination = Page.Locator("div.pagination").Last;
+
+        // Гарантируем, что визард успел переключиться на нужную страницу (например, "3 of 28")
+        await Expect(pagination).ToContainTextAsync($"{stepNumber} of 28", new() { Timeout = 10000 });
+
+        // Выполняем ассерты для текущей страницы
+        await verifyAction();
+
+        // Переходим к следующему шагу визарда
+        await GoToNextStepAsync();
+    }
+
 
 }
