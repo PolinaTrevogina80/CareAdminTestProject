@@ -1,59 +1,89 @@
 ﻿using Microsoft.Playwright;
-using Serilog;
-using System.Globalization;
-using System.Text.RegularExpressions;
+using CareAdminTestProject.Common;
 using static CareAdminTestProject.Incidents.IncidentDetails.Pages.IncidentTabs.RNSupervisorTab.RNSupervisorTabInfo;
-using static DetailsTab;
 using static Microsoft.Playwright.Assertions;
+using Log = CareAdminTestProject.Common.TestLog;
+
 
 namespace CareAdminTestProject.Incidents.IncidentDetails.Pages.IncidentTabs;
 
+/// <summary>
+/// Represents the RN/Supervisor questionnaire tab within the incident reporting form.
+/// Manages the step-by-step injection, evaluation, and verification of responses.
+/// </summary>
 public class RNSupervisorTab : BaseIncidentTabs
 {
     private Boolean ToDoScreenshots = false;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="RNSupervisorTab"/> class.
+    /// </summary>
+    /// <param name="page">The Playwright page instance.</param>
     public RNSupervisorTab(IPage page) : base(page) { }
 
+    /// <summary>
+    /// Encapsulates all data records and response information for the RN/Supervisor questionnaire form.
+    /// </summary>
     public record RNSupervisorTabInfo(
-        IReadOnlyList<string> Locations, // Список строк для выбора в мультиселекте
+        IReadOnlyList<string> Locations, // List of strings for multiselect choices
         LastSeenInfo LastSeen,
         DescribeExactlyInfo DescribeExactly,
-    // Steps (4-28)
-    IReadOnlyList<QuestionWithDetails> Questions
+        // Steps (4-28)
+        IReadOnlyList<QuestionWithDetails> Questions
     )
     {
+        /// <summary>
+        /// Stores detailed info about when the patient was last seen.
+        /// </summary>
         public record LastSeenInfo(TimeOnly Time, string Details);
+
+        /// <summary>
+        /// Stores meticulous textual descriptive details about the scene.
+        /// </summary>
         public record DescribeExactlyInfo(string Details);
+
+        /// <summary>
+        /// Holds boolean responses along with optional corresponding comments for specific validation points.
+        /// </summary>
         public record QuestionWithDetails(bool Answer, string Comments = "");
     }
 
+    /// <summary>
+    /// Sequentially steps through the RN/Supervisor wizard form and executes input actions for each logical step.
+    /// </summary>
+    /// <param name="info">The complete questionnaire reference dataset holding expected values.</param>
+    /// <param name="onStepFilled">An optional callback delegate triggered after completing an isolated workflow step.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
     public async Task FillQuestionsAsync(RNSupervisorTabInfo info, Func<int, Task>? onStepFilled = null)
     {
         await SelectLocationsAsync(info.Locations);
 
 
-        // Шаг 1: Время последнего визита
+        // Step 1: Time of the last visit
         await FillFormStepAsync(1, async () =>
         {
-            // Используем "answerTime" (имя из вашего примера)
+            // Use "answerTime" (the name matching your framework reference)
             await SelectTimeInPickerAsync("answerTime", info.LastSeen.Time);
 
-            // Находим textarea на текущей странице
+            // Locate the details textarea on the current active view wrapper
             var detailsArea = Page.GetByPlaceholder("Enter details");
             await detailsArea.FillAsync(info.LastSeen.Details);
             if (ToDoScreenshots)
             {
+                // NOTE: Review debug screenshot sequence
                 await Page.MakeScreenshotAsync("RN_Step1_Filled");
             }
         });
 
-        // Шаг 2: Детальное описание
+        // Step 2: Exact meticulous description
         await FillFormStepAsync(2, async () =>
         {
-            // Заполняем детали для второго вопроса
+            // Populate details context block for the second question
             var detailsArea = Page.GetByPlaceholder("Enter details");
             await detailsArea.FillAsync(info.DescribeExactly.Details);
             if (ToDoScreenshots)
             {
+                // NOTE: Review debug screenshot sequence
                 await Page.MakeScreenshotAsync("RN_Step2_Filled");
             }
         });
@@ -61,22 +91,22 @@ public class RNSupervisorTab : BaseIncidentTabs
         for (int i = 0; i < info.Questions.Count; i++)
         {
             var currentQuestion = info.Questions[i];
-            int stepNumber = i + 3; // Начинаем с 4-го шага
+            int stepNumber = i + 3; // Offset index to start precisely from the 4th logical form step
 
             await FillFormStepAsync(stepNumber, async () =>
             {
                 var buttonName = currentQuestion.Answer ? "YES" : "NO";
 
-                // 1. Ищем mat-button-toggle, который содержит нужный текст
-                // Это более надежно для Angular Material, чем GetByRole
+                // 1. Locate the mat-button-toggle component matching target text
+                // This approach is more resilient for Angular Material structures than default GetByRole methods
                 var toggleButton = Page.Locator("mat-button-toggle")
                     .Filter(new() { HasTextRegex = new Regex($"^{buttonName}$", RegexOptions.IgnoreCase) });
 
-                // 2. Ждем кликабельности и нажимаем
+                // 2. Wait until the target element handles click actions, then execute click
                 await toggleButton.WaitForAsync(new() { State = WaitForSelectorState.Visible });
                 await toggleButton.ClickAsync();
 
-                // 3. Если есть текст комментария — заполняем
+                // 3. Inject comments if additional string context properties are populated
                 if (!string.IsNullOrEmpty(currentQuestion.Comments))
                 {
                     var detailsArea = Page.GetByPlaceholder("Enter comments");
@@ -85,6 +115,7 @@ public class RNSupervisorTab : BaseIncidentTabs
 
                 if (ToDoScreenshots)
                 {
+                    // NOTE: Review debug screenshot sequence
                     await Page.MakeScreenshotAsync($"RN_Step_{stepNumber}_Filled");
                 }
             });
@@ -93,34 +124,42 @@ public class RNSupervisorTab : BaseIncidentTabs
     }
 
     /// <summary>
-    /// Обертка для обработки шага: ждет номер страницы, выполняет действия и жмет "Далее"
+    /// Wrapper for step processing: waits for the step/page number, performs the actions, and clicks "Next".
     /// </summary>
+    /// <param name="stepNumber">The target step sequential position number out of the total 28 steps.</param>
+    /// <param name="fillAction">The delegate wrapper housing input form workflow steps.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
     private async Task FillFormStepAsync(int stepNumber, Func<Task> fillAction)
     {
         var pagination = Page.Locator("div.pagination").Last;
 
-        // Ждем, когда страница станет именно той, которую мы заполняем
+        // Wait until the pagination counter matches the precise page index currently being evaluated
         await Expect(pagination).ToContainTextAsync($"{stepNumber} of 28", new() { Timeout = 10000 });
 
-        // Выполняем логику заполнения полей
+        // Execute structural internal field injection logic
         await fillAction();
 
-        // Переходим к следующему шагу
+        // Advance layout pointer forward to the next step
         await GoToNextStepAsync();
 
-        // ФИКС: Ждем исчезновения текста ТОЛЬКО если это НЕ последняя страница
+        // FIX: Only await text disappearance if this evaluation is NOT the final 28th step index
         if (stepNumber < 28)
         {
             await Expect(pagination).Not.ToContainTextAsync($"{stepNumber} of 28", new() { Timeout = 3000 });
         }
     }
 
+    /// <summary>
+    /// Selects multiple accident location checkboxes or items out of an overlay list container options.
+    /// </summary>
+    /// <param name="locations">The collection list of descriptive accident areas to enable.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
     public async Task SelectLocationsAsync(IReadOnlyList<string> locations)
     {
         if (locations == null || !locations.Any()) return;
 
-        // 1. Находим и кликаем на кнопку "+" внутри блока Area(s) of Accident
-        // Ищем контейнер секции, а затем в нем кнопку
+        // 1. Locate and click on the "+" trigger button inside the Area(s) of Accident interface container
+        // Isolate the parent section wrapper, then resolve its core internal trigger element
         var addButton = Page.Locator(".locations")
             .Locator("button, mat-icon")
             .Filter(new() { HasText = "add" })
@@ -128,14 +167,14 @@ public class RNSupervisorTab : BaseIncidentTabs
 
         await addButton.ClickAsync();
 
-        // 2. Ждем появления контейнера со списком (обычно это mat-option или mat-list-item)
-        // В Angular Material выпадающие списки рендерятся в отдельном контейнере в корне body
+        // 2. Synchronize layout expectation until the pop-up modal overlay containing options finishes rendering
+        // Under Angular Material, selection dropdown lists populate inside a separate body root overlay element wrapper
         var optionsContainer = Page.Locator(".cdk-overlay-container");
         await optionsContainer.WaitForAsync(new() { State = WaitForSelectorState.Visible });
 
         foreach (var location in locations)
         {
-            // Ищем элемент списка, который содержит точный текст (с учетом возможных пробелов)
+            // Resolve selection rows whose internal label text models exactly match target values (handling spaces)
             var option = optionsContainer.Locator("mat-list-item, mat-option, .mat-mdc-list-item")
                 .Filter(new()
                 {
@@ -148,33 +187,41 @@ public class RNSupervisorTab : BaseIncidentTabs
             }
         }
 
-        // 3. Закрываем список (нажимаем Escape или кликаем в пустое место), 
-        // если он не закрылся автоматически после выбора
+        // 3. Dismiss the active overlay picker template (triggering an Escape fallback action) 
+        // in case the modal layer interface container failed to close automatically post selection sequence
         await Page.Keyboard.PressAsync("Escape");
     }
 
+    /// <summary>
+    /// Commands the interface pagination indicators to cycle one wizard slide forward.
+    /// </summary>
+    /// <returns>A task representing the asynchronous operation.</returns>
     public async Task GoToNextStepAsync()
     {
         var nextButton = Page.Locator(".pagination-button:has(mat-icon:text('keyboard_arrow_right'))").First;
         await nextButton.WaitForAsync(new() { State = WaitForSelectorState.Visible });
         await nextButton.ClickAsync();
 
-        // Завершение анимации перехода слайда в Kendo/Angular
-        // Без этого клики могут регистрироваться браузером дважды или проглатываться
-        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle); // Ждем, если идут микро-запросы
-        await Task.Delay(250); // Даем четверть секунды на завершение CSS-транзишна слайда
+        // Complete the animation layout slide transitions handled by Kendo UI or Angular components
+        // Without this brief rest, consecutive automated browser click triggers can duplicate input executions
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle); // Synchronize micro API request hooks if pending
+        await Task.Delay(250); // Allocate a quarter-second duration margin for completing underlying CSS slide transition rules
     }
 
+    /// <summary>
+    /// Collects and processes the textual array of location markers currently selected on the user interface.
+    /// </summary>
+    /// <returns>A clean read-only string list of active location chip configurations.</returns>
     public async Task<IReadOnlyList<string>> GetSelectedLocationsAsync()
     {
-        // 1. Находим контейнер со всеми выбранными элементами
+        // 1. Isolate the base organizational container enclosing every active selected chip component
         var chipsContainer = Page.Locator("div.cad-chips-wrapper, div.selected-items").First;
         await chipsContainer.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5000 });
 
-        // 2. Небольшая задержка для завершения рендеринга Angular
+        // 2. Introduce a temporary execution pause ensuring Angular layouts complete their local render evaluations
         await Page.WaitForTimeoutAsync(200);
 
-        // 3. Берем именно span с текстом внутри каждого выбранного элемента
+        // 3. Extract the underlying text target directly from the internal span structure of every present chip item
         var locationSpans = chipsContainer.Locator("div.selected-item span");
 
         var cleanLocations = new List<string>();
@@ -182,7 +229,7 @@ public class RNSupervisorTab : BaseIncidentTabs
 
         for (int i = 0; i < count; i++)
         {
-            // Извлекаем чистый текст напрямую из тега span
+            // Evaluate raw string node assignments directly out of the span DOM textContent property field
             string rawText = await locationSpans.Nth(i).EvaluateAsync<string>("el => el.textContent") ?? "";
 
             string cleanText = rawText.Trim();
@@ -196,10 +243,13 @@ public class RNSupervisorTab : BaseIncidentTabs
         return cleanLocations;
     }
 
-    // Проверка того, какая кнопка-тоггл (YES/NO) сейчас активна
+    /// <summary>
+    /// Evaluates which toggle button option status (YES or NO) is currently designated as active in the user view.
+    /// </summary>
+    /// <returns>The descriptive text of the active button element choice string, or empty if none are enabled.</returns>
     public async Task<string> GetSelectedToggleValueAsync()
     {
-        // Находим mat-button-toggle, у которого присутствует класс активности (например, mat-button-toggle-checked)
+        // Identify the mat-button-toggle node elements having active visual style definitions applied
         var checkedToggle = Page.Locator("mat-button-toggle.mat-button-toggle-checked, mat-button-toggle[checked='true']");
         if (await checkedToggle.CountAsync() > 0)
         {
@@ -209,90 +259,97 @@ public class RNSupervisorTab : BaseIncidentTabs
     }
 
 
+    /// <summary>
+    /// Executes a comprehensive step-by-step verification of all questionnaire wizard data fields.
+    /// </summary>
+    /// <param name="expected">The structural data object containing the expected responses and configurations for comparison.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
     public async Task VerifyDataFieldsAsync(RNSupervisorTabInfo expected)
     {
+        // NOTE: Review debug log
+        Log.Debug("[RN_SUPERVISOR_TAB] Launching step-by-step form verification wizard...");
 
-        Log.Debug("[RN_SUPERVISOR_TAB] Запуск пошаговой верификации формы...");
-
-        // 0. Проверяем выбранные локации на стартовом экране
+        // 0. Verify selected locations on the initial screen configuration layout
         if (expected.Locations != null && expected.Locations.Any())
         {
             var actualLocations = await GetSelectedLocationsAsync();
 
             foreach (var expectedLocation in expected.Locations)
             {
-                // Проверяем, что ХОТЯ БЫ ОДИН элемент на UI частично содержит имя нашей локации
+                // Verify that AT LEAST ONE element on the UI partially contains the name of our target location
                 bool isFound = actualLocations.Any(act => act.Contains(expectedLocation.Trim(), StringComparison.OrdinalIgnoreCase));
 
                 Assert.That(isFound, Is.True,
-                    $"Локация '{expectedLocation}' не найдена среди выбранных на UI. Доступно на UI: {string.Join(", ", actualLocations)}");
+                    $"Location '{expectedLocation}' was not found among those selected on the UI. Available on UI: {string.Join(", ", actualLocations)}");
             }
         }
 
-        // Шаг 1: Время последнего визита
+        // Step 1: Time of the last visit validation checkpoint
         await VerifyFormStepAsync(1, async () =>
         {
-            // Проверяем заполненное время через InputValueAsync
+            // Verify populated time picker string metrics using InputValueAsync
             var actualTime = await Page.Locator("kendo-timepicker[name='answerTime'] input:visible").InputValueAsync();
             string expectedTimeStr = expected.LastSeen.Time.ToString("hh:mm tt", System.Globalization.CultureInfo.InvariantCulture);
-            Assert.That(actualTime, Is.EqualTo(expectedTimeStr), "Шаг 1: Время последнего визита не совпадает.");
+            Assert.That(actualTime, Is.EqualTo(expectedTimeStr), "Step 1: Time of last visit evaluation mismatch.");
 
-            // Проверяем детальное описание
+            // Verify explicit details textbox value
             var actualDetails = await Page.GetByPlaceholder("Enter details").InputValueAsync();
-            Assert.That(actualDetails, Is.EqualTo(expected.LastSeen.Details), "Шаг 1: Детали не совпадают.");
+            Assert.That(actualDetails, Is.EqualTo(expected.LastSeen.Details), "Step 1: Details description value mismatch.");
         });
 
-        // Шаг 2: Детальное описание происшествия
+        // Step 2: Meticulous incident description validation checkpoint
         await VerifyFormStepAsync(2, async () =>
         {
             var actualDetails = await Page.GetByPlaceholder("Enter details").InputValueAsync();
-            Assert.That(actualDetails, Is.EqualTo(expected.DescribeExactly.Details), "Шаг 2: Детальное описание не совпадает.");
+            Assert.That(actualDetails, Is.EqualTo(expected.DescribeExactly.Details), "Step 2: Detailed description narrative mismatch.");
         });
 
-        // Шаги 3-28: Циклический перебор динамических вопросов (YES/NO + Комментарии)
+        // Steps 3-28: Sequential evaluation loop processing dynamic question cards (YES/NO toggles + comments)
         for (int i = 0; i < expected.Questions.Count; i++)
         {
             var currentQuestion = expected.Questions[i];
-            int stepNumber = i + 3; // По логике заполнения, вопросы начинаются со страницы 3
+            int stepNumber = i + 3; // Based on setup logic, dynamic questionnaires initialize starting at wizard page index 3
 
             await VerifyFormStepAsync(stepNumber, async () =>
             {
-                // 1. Проверяем выбранное состояние тоггла (YES или NO)
+                // 1. Verify target toggled selection state (YES or NO matching property flag)
                 string expectedButtonName = currentQuestion.Answer ? "YES" : "NO";
                 string actualButtonName = await GetSelectedToggleValueAsync();
 
                 Assert.That(actualButtonName.ToUpper(), Is.EqualTo(expectedButtonName),
-                    $"Шаг {stepNumber}: Неверный выбор переключателя.");
+                    $"Step {stepNumber}: Incorrect toggle button option selection.");
 
-                // 2. Если в черновике был сохранен комментарий, сверяем его текстовое поле
+                // 2. Evaluate string comments area if data record parameter constraints are populated
                 if (!string.IsNullOrEmpty(currentQuestion.Comments))
                 {
                     var actualComment = await Page.GetByPlaceholder("Enter comments").InputValueAsync();
                     Assert.That(actualComment, Is.EqualTo(currentQuestion.Comments),
-                        $"Шаг {stepNumber}: Комментарий не совпадает.");
+                        $"Step {stepNumber}: Question comments field string mismatch.");
                 }
             });
         }
 
-        Log.Debug("[RN_SUPERVISOR_TAB] Пошаговая верификация визарда успешно завершена.");
+        // NOTE: Review debug log
+        Log.Debug("[RN_SUPERVISOR_TAB] Step-by-step wizard questionnaire validation completed successfully.");
     }
 
     /// <summary>
-    /// Обертка для обработки шага верификации: контролирует пагинацию, выполняет проверки на текущем слайде и жмет "Далее"
+    /// Wrapper for verification step processing: manages pagination, executes checks on the current slide, and clicks "Next".
     /// </summary>
+    /// <param name="stepNumber">The target page index position that layout indicators must validate against.</param>
+    /// <param name="verifyAction">The wrapper delegate housing assertion blocks for the active view frame.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
     private async Task VerifyFormStepAsync(int stepNumber, Func<Task> verifyAction)
     {
         var pagination = Page.Locator("div.pagination").Last;
 
-        // Гарантируем, что визард успел переключиться на нужную страницу (например, "3 of 28")
+        // Ensure that the wizard has successfully completed its layout navigation shift to the required page indices
         await Expect(pagination).ToContainTextAsync($"{stepNumber} of 28", new() { Timeout = 10000 });
 
-        // Выполняем ассерты для текущей страницы
+        // Execute target assertions for the current active page template
         await verifyAction();
 
-        // Переходим к следующему шагу визарда
+        // Cycle layout view forward to the next wizard slide container
         await GoToNextStepAsync();
     }
-
-
 }

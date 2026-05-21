@@ -1,20 +1,33 @@
-﻿using static GeneralTab;
-using static IncidentCreatePage;
+﻿using CareAdminTestProject.Incidents.IncidentDetails.Pages.IncidentTabs;
+using System.Xml;
 using static CareAdminTestProject.Incidents.IncidentDetails.Pages.IncidentTabs.RNSupervisorTab;
 using static CareAdminTestProject.Incidents.IncidentDetails.Pages.IncidentTabs.RNSupervisorTab.RNSupervisorTabInfo;
-using CareAdminTestProject.Incidents.IncidentDetails.Pages.IncidentTabs;
+using static GeneralTab;
+using static IncidentCreatePage;
 
+/// <summary>
+/// Service factory class utilizing Object Mother and Static Factory patterns to construct consolidated test datasets.
+/// Generates comprehensive incident records tailored to specified timezones and profile parameters.
+/// </summary>
 public static class IncidentDataFactory
 {
+    /// <summary>
+    /// Encapsulates the entire multi-tab dataset required to fully populate and verify an incident report.
+    /// </summary>
     public record IncidentTestData(
         IncidentGeneralInfo General,
         DetailsTab.IncidentDetailsInfo Details,
         StateTab.IncidentStateInfo State,
         List<MedicationTab.MedicationInfo> Medications,
-        RNSupervisorTab.RNSupervisorTabInfo RNSupervisor,
+        RNSupervisorTabInfo RNSupervisor,
         SummaryTab.IncidentSummaryInfo Summary
         );
-    // Базовый метод для создания типичного инцидента (Object Mother)
+
+    /// <summary>
+    /// Creates a typical baseline dataset representing a standard Fall incident (Object Mother pattern).
+    /// </summary>
+    /// <param name="residentInfo">Biographical and room/bed placement attributes extracted for the target profile.</param>
+    /// <returns>A fully structured <see cref="IncidentTestData"/> model initialized with Pacific Standard Time metrics.</returns>
     public static IncidentTestData CreateDefaultFall(ResidentInfo residentInfo)
     {
         var usTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Pacific Standard Time");
@@ -27,12 +40,15 @@ public static class IncidentDataFactory
             Medications: CreateDefaultMedications(),
             RNSupervisor: CreateDefaultRNSupervisor(),
             Summary: CreateDefaultSummary()
-
         );
     }
 
 
-    // Сценарий для другого типа инцидента (Object Mother)
+    /// <summary>
+    /// Creates a customized variation of the baseline dataset representing a Medication Error incident.
+    /// </summary>
+    /// <param name="residentInfo">Biographical and room/bed placement attributes extracted for the target profile.</param>
+    /// <returns>An adjusted <see cref="IncidentTestData"/> instance matching medication deviation parameters.</returns>
     public static IncidentTestData CreateMedicationError(ResidentInfo residentInfo)
     {
         var baseData = CreateDefaultFall(residentInfo);
@@ -42,21 +58,43 @@ public static class IncidentDataFactory
         };
     }
 
-    // --- Приватные методы для сборки частей (Static Factory) ---
+    // --- Private builder methods (Static Factory pattern) ---
 
+    /// <summary>
+    /// Constructs the initial dataset for the General tab form fields, aligning runtime system dates with Eastern Standard Time.
+    /// </summary>
+    /// <param name="residentInfo">Biographical and room/bed placement attributes extracted for the target profile.</param>
+    /// <returns>An initialized <see cref="IncidentGeneralInfo"/> data record model.</returns>
     private static IncidentGeneralInfo CreateDefaultGeneral(ResidentInfo residentInfo)
     {
-        // 1. Опеределяем часовой пояс Восточного времени (Нью-Йорк/EDT)
+        // 1. Determine the Eastern Time zone (New York/EDT)
         var edtZone = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
 
-        // 2. Конвертируем текущее время вашего ПК (МСК) в время EDT
+        // 2. Convert PC's current time to EDT time
         DateTime edtNow = TimeZoneInfo.ConvertTime(DateTime.Now, edtZone);
+
+        // 3. Calculate how many minutes have passed since the beginning of today (00:00) in the EDT time zone
+        int minutesPassedInDay = (int)(edtNow - edtNow.Date).TotalMinutes;
+
+        // 4. Generate a unique shift STRICTLY BACK(in the past)
+        // At least 2 minutes back (to bypass micro-lags of server desynchronization), 
+        // but no more than has passed since the beginning of the day, so as not to fly into yesterday.
+        // Limit the step to a maximum of 60 minutes to stay within the current day.
+        var random = new Random();
+        int minShift = Math.Min(2, minutesPassedInDay);
+        int maxShift = Math.Max(2, Math.Min(60, minutesPassedInDay));
+
+        int randomMinuteShift = random.Next(minShift, maxShift);
+
+        // 5. Subtract the shift from the current time. The time is guaranteed to be unique, in the past, and within the current date!
+        var uniqueTime = new TimeOnly(edtNow.Hour, edtNow.Minute).Add(TimeSpan.FromMinutes(-randomMinuteShift));
+
 
         return new IncidentGeneralInfo(
             room: residentInfo.Room,
             bed: residentInfo.Bed,
-            date: edtNow.Date, // Передаст текущую дату EDT со временем 00:00:00
-            time: new TimeOnly(edtNow.Hour, edtNow.Minute),
+            date: edtNow.Date, 
+            time: uniqueTime,
             unit: "2",
             location: "Lobby",
             type: "Fall",
@@ -72,6 +110,11 @@ public static class IncidentDataFactory
         );
     }
 
+    /// <summary>
+    /// Constructs the dataset for the Details tab form fields, mapping medical assessment details and notification time logs.
+    /// </summary>
+    /// <param name="now">The system timestamp used as a base reference configuration.</param>
+    /// <returns>An initialized <see cref="DetailsTab.IncidentDetailsInfo"/> data record model.</returns>
     private static DetailsTab.IncidentDetailsInfo CreateDefaultDetails(DateTime now)
     {
         var edtZone = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
@@ -94,6 +137,10 @@ public static class IncidentDataFactory
     );
     }
 
+    /// <summary>
+    /// Constructs the dataset for the State tab checkboxes, radio option metrics, and assistive devices tracking.
+    /// </summary>
+    /// <returns>An initialized <see cref="StateTab.IncidentStateInfo"/> data record model.</returns>
     private static StateTab.IncidentStateInfo CreateDefaultState() => new(
             Communication: new StateTab.CommunicationStatus(
                 Oriented: true, Person: true, Time: true, Place: true,
@@ -107,7 +154,7 @@ public static class IncidentDataFactory
                 BlindDeaf: false,
                 LanguageBarrier: false
                 ),
-            AmbulatoryStatus: "Non Ambulatory", // Соответствует тексту у радиокнопки
+            AmbulatoryStatus: "Non Ambulatory", // Matches the text display property on the radio button
             NeedsAssistanceOf: "One staff member",
             UsesLift: false,
             NeedsSupervision: true,
@@ -140,13 +187,21 @@ public static class IncidentDataFactory
                 )
     );
 
+    /// <summary>
+    /// Constructs a basic list array collection containing sample medication entry rows.
+    /// </summary>
+    /// <returns>A initialized collection list containing <see cref="MedicationTab.MedicationInfo"/> models.</returns>
     private static List<MedicationTab.MedicationInfo> CreateDefaultMedications() => new() {
         new ("Aspirin", "100mg", "Once a day", "08:00"),
         new ("Nurafen", "250mg", "Twice a day", "15:00"),
         new ("Melatonin", "5mg", "Before sleep", "21:00")
     };
 
-
+    /// <summary>
+    /// Constructs the dataset for the RN/Supervisor questionnaire tab, populating location selection arrays, 
+    /// last-seen metadata timelines, and 25 sequential validation step query parameters.
+    /// </summary>
+    /// <returns>An initialized <see cref="RNSupervisorTab.RNSupervisorTabInfo"/> data record model.</returns>
     private static RNSupervisorTab.RNSupervisorTabInfo CreateDefaultRNSupervisor() => new(
         Locations: new[] { "ADL Suite", "Dining Room" },
         LastSeen: new RNSupervisorTabInfo.LastSeenInfo(
@@ -187,6 +242,10 @@ public static class IncidentDataFactory
     }
 );
 
+    /// <summary>
+    /// Constructs the final dataset for the Summary tab, aggregating legal status approvals, multidisciplinary conclusions, and target signature descriptors.
+    /// </summary>
+    /// <returns>An initialized <see cref="SummaryTab.IncidentSummaryInfo"/> data record model.</returns>
     private static SummaryTab.IncidentSummaryInfo CreateDefaultSummary() => new(
     CarePlanUpdated: true,
     SetAsReportable: true,
@@ -194,14 +253,14 @@ public static class IncidentDataFactory
     SendToLegal: true,
     Summary: "The incident was reviewed by the interdisciplinary team. Patient's condition is stable.",
     Plan: "Continue monitoring vital signs every 4 hours for the next 24 hours and update care plan goals.",
-    Conclusion: "Unavoidable", // Значение должно совпадать с текстом у радиокнопки
+    Conclusion: "Unavoidable", // This text value configuration must exactly replicate the UI radio button label string text
     EvidenceOfAbuse: false,
     EvidenceReason: " The resident was observed sitting on the floor and the resident was not able to give " +
         "details of what occurred secondary to confusion.  It was concluded from the review of the camera footage " +
         "and staff statements that a fall had occurred in the absence of evidence suggesting otherwise. There were " +
         "no elements suggesting that abuse, neglect, or mistreatment occurred ",
     ReportedToAgency: false,
-    PossibleContributingFactor: new[] {"FALLS WITHIN 30 DAYS ADMISSION", "UNDERLYING CHRONIC CONDITION" }, // Выберите существующее значение из вашего Dropdown
-    DirectorSignature: "Polly Test" // Имя, которое вводится в поле подписи
+    PossibleContributingFactor: new[] { "FALLS WITHIN 30 DAYS ADMISSION", "UNDERLYING CHRONIC CONDITION" }, // Resolves to an active matching option value within your Dropdown select lists
+    DirectorSignature: "Polly Test" // The target user profile name inserted inside the formal signature field wrapper container
 );
 }

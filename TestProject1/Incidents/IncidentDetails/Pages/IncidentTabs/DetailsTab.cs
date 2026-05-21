@@ -1,10 +1,18 @@
 ﻿using CareAdminTestProject.Incidents.IncidentDetails.Pages.IncidentTabs;
 using Microsoft.Playwright;
 using Serilog;
-using static GeneralTab;
+using Log = CareAdminTestProject.Common.TestLog;
 
+
+/// <summary>
+/// Represents the Details tab within the incident reporting form.
+/// Provides methods and data structures to interact with and fill incident details.
+/// </summary>
 public class DetailsTab : BaseIncidentTabs
 {
+    /// <summary>
+    /// Represents comprehensive incident detail records.
+    /// </summary>
     public record IncidentDetailsInfo(
         string OccurrenceDescription,
         string PatientDescription,
@@ -23,7 +31,9 @@ public class DetailsTab : BaseIncidentTabs
 
     private string AllDiagnises;
 
-
+    /// <summary>
+    /// Represents clinical vital signs recorded during the incident.
+    /// </summary>
     public record VitalSigns(
         string Temperature,
         string Pulse,
@@ -33,6 +43,9 @@ public class DetailsTab : BaseIncidentTabs
         string BloodGlucose
     );
 
+    /// <summary>
+    /// Represents notification details sent to the patient's relative.
+    /// </summary>
     public record RelativeNotification(
         string Name,
         string Relationship,
@@ -41,6 +54,9 @@ public class DetailsTab : BaseIncidentTabs
         TimeOnly Time
     );
 
+    /// <summary>
+    /// Represents notification details sent to the Medical Doctor (MD).
+    /// </summary>
     public record MDNotification(
         string MDName,
         string WhoNotified,
@@ -48,10 +64,15 @@ public class DetailsTab : BaseIncidentTabs
         TimeOnly Time
     );
 
+    /// <summary>
+    /// Constructs a map of fields to their respective data entry actions and validation statuses.
+    /// </summary>
+    /// <param name="data">The incident details dataset used to populate fields dynamically.</param>
+    /// <returns>A dictionary mapping field names to an execution action and a required flag.</returns>
     public Dictionary<string, (Func<Task> Action, bool IsRequired)> GetRequiredFieldsMap(IncidentDetailsInfo data)
     {
         var relativeLineContext = Page.Locator("div.panel-line, div.col-wrap")
-    .Filter(new() { HasText = "Relationship" });
+            .Filter(new() { HasText = "Relationship" });
 
         var mdLineContext = Page.Locator("div.panel-line, div.col-wrap")
             .Filter(new() { HasText = "Who Notified MD" });
@@ -70,15 +91,15 @@ public class DetailsTab : BaseIncidentTabs
         { "Blood Glucose (If DM Only)", (async () => await GetFieldByLabel("Blood Glucose (If DM Only)").FillAsync(data.VitalSigns.BloodGlucose), false) },
 
         { "First Aid Administered", (async () => {
-            // Это поле без точки, просто переключаем его в "Yes", чтобы появилось следующее поле
+            // This field has no dot, simply toggle it to "Yes" to reveal the next field
             await SelectFirstAdmitedAsync(true, "");
         }, false) },
 
         { "Describe (MD)", (async () => {
-            // 1. Убеждаемся, что свитч включен (на случай, если мы проверяем поля вразнобой)
+            // 1. Ensure the switch is toggled on (in case fields are evaluated out of order)
             await SelectFirstAdmitedAsync(true, "");
     
-            // 2. Заполняем само поле описания
+            // 2. Populate the description field itself
             var describeField = Page.Locator("textarea[name='firstAidDesc']");
             await describeField.FillAsync(data.FirstAidDescribe);
         }, true) },
@@ -92,14 +113,14 @@ public class DetailsTab : BaseIncidentTabs
         { "Relationship", (async () => await GetFieldByLabel("Relationship").FillAsync(data.RelativeNotified.Relationship), true) },
         { "Who Notified (Relative)", (async () => await GetFieldByLabel("Who Notified").First.FillAsync(data.RelativeNotified.WhoNotified), true) },
         { "Date and Time of Notification (Relative)", (async () => 
-            // Передаем контекст строки relativeLineContext последним аргументом
+            // Pass the relativeLineContext row context as the last argument
             await SelectDateTimeInPickerAsync("Date and Time of Notification", data.RelativeNotified.Date, data.RelativeNotified.Time, relativeLineContext), true)
         },        
         // MD Notification
         { "MD Notified (MD)", (async () => await GetFieldByLabel("MD Notified").FillAsync(data.MDNotified.MDName), true) },
         { "Who Notified MD", (async () => await GetFieldByLabel("Who Notified MD").FillAsync(data.MDNotified.WhoNotified), true) },
         { "Date and Time of Notification (MD)", (async () => 
-            // Передаем контекст строки mdLineContext последним аргументом
+            // Pass the mdLineContext row context as the last argument
             await SelectDateTimeInPickerAsync("Date and Time of Notification", data.MDNotified.Date, data.MDNotified.Time, mdLineContext), true)
         },
         // Final Fields
@@ -110,23 +131,33 @@ public class DetailsTab : BaseIncidentTabs
         return map;
     }
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="DetailsTab"/> class.
+    /// </summary>
+    /// <param name="page">The Playwright page instance.</param>
     public DetailsTab(IPage page) : base(page) { }
 
+    /// <summary>
+    /// Populates the complete Details form fields with data provided.
+    /// </summary>
+    /// <param name="details">The model holding all structural incident data parameters.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
     public async Task FillDetailsInfoAsync(IncidentDetailsInfo details)
     {
-        // Описания (Textareas)
+        // Descriptions (Textareas)
         await GetFieldByLabel("Describe Occurrence").FillAsync(details.OccurrenceDescription);
         await GetFieldByLabel("Patient’s Description of Occurrence").FillAsync(details.PatientDescription);
         if (!string.IsNullOrEmpty(AllDiagnises))
         {
             await GetFieldByLabel("All Diagnoses").FillAsync(AllDiagnises);
+            // NOTE: Review debug log
             Log.Debug("All Diagnoses field restored from saved variable.");
         }
-        
+
         // Vital Signs
         await FillVitalSignsAsync(details.VitalSigns);
 
-        // Frsrt Aid
+        // First Aid
         await SelectFirstAdmitedAsync(details.FirstAidAdministered, details.FirstAidDescribe);
 
         // Transfer
@@ -147,6 +178,11 @@ public class DetailsTab : BaseIncidentTabs
         await GetFieldByLabel("Diagnostic Tests Ordered").FillAsync(details.DiagnosticTests);
     }
 
+    /// <summary>
+    /// Fills internal medical diagnostic metrics inputs.
+    /// </summary>
+    /// <param name="vitals">The objective metrics collected during the scene assessment.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
     private async Task FillVitalSignsAsync(VitalSigns vitals)
     {
         await GetFieldByLabel("Temperature").FillAsync(vitals.Temperature);
@@ -156,7 +192,11 @@ public class DetailsTab : BaseIncidentTabs
         await GetFieldByLabel("Blood Pressure Laying").FillAsync(vitals.BpLaying);
         await GetFieldByLabel("Blood Glucose").FillAsync(vitals.BloodGlucose);
     }
-
+    /// <summary>
+    /// Populates the relative notification section fields using a row-specific context.
+    /// </summary>
+    /// <param name="rel">The structural details of the relative notification.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
     private async Task FillRelativeNotificationAsync(RelativeNotification rel)
     {
         var relativeLineContext = Page.Locator("div.panel-line, div.col-wrap")
@@ -166,10 +206,15 @@ public class DetailsTab : BaseIncidentTabs
         await relativeLineContext.Locator(GetFieldByLabel("Relationship")).FillAsync(rel.Relationship);
         await relativeLineContext.Locator(GetFieldByLabel("Who Notified")).FillAsync(rel.WhoNotified);
 
-        // Передаем контекст строки вместо индекса 0
+        // Pass the row context instead of index 0
         await SelectDateTimeInPickerAsync("Date and Time of Notification", rel.Date, rel.Time, relativeLineContext);
     }
 
+    /// <summary>
+    /// Populates the medical doctor (MD) notification section fields using a row-specific context.
+    /// </summary>
+    /// <param name="md">The structural details of the MD notification.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
     private async Task FillMDNotificationAsync(MDNotification md)
     {
         var mdLineContext = Page.Locator("div.panel-line, div.col-wrap")
@@ -178,22 +223,30 @@ public class DetailsTab : BaseIncidentTabs
         await mdLineContext.Locator(GetFieldByLabel("MD Notified")).FillAsync(md.MDName);
         await mdLineContext.Locator(GetFieldByLabel("Who Notified MD")).FillAsync(md.WhoNotified);
 
-        // Передаем контекст строки вместо индекса 1
+        // Pass the row context instead of index 1
         await SelectDateTimeInPickerAsync("Date and Time of Notification", md.Date, md.Time, mdLineContext);
     }
 
+    /// <summary>
+    /// Handles the first aid administration toggle switch and inputs its corresponding description if required.
+    /// </summary>
+    /// <param name="firstAidAdministered">Indicates whether first aid was administered.</param>
+    /// <param name="describe">The detailed description of the administered first aid.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
     public async Task SelectFirstAdmitedAsync(Boolean firstAidAdministered, string describe)
     {
         // First Aid (Radio + Describe)
-        // Ищем контейнер, в котором есть текст заголовка, и внутри него находим свитч
+        // Locate the container holding the header text, then find the switch inside it
 
+        // NOTE: Review debug log
         Log.Debug($"Looking for the field First Aid Administered, and try to switch it");
 
         await SelectRadioOptionAsync("First Aid Administered:", firstAidAdministered ? "Yes" : "No");
 
-        // Если нужно "Yes" (true), а сейчас "false" — кликаем
+        // If "Yes" (true) is required, and current status is "false" — perform click
         if (firstAidAdministered == true)
         {
+            // NOTE: Review debug log
             Log.Debug($"Enter Description");
 
             var describeField = Page.Locator("textarea[name='firstAidDesc']");
@@ -203,83 +256,104 @@ public class DetailsTab : BaseIncidentTabs
         }
 
     }
+
+    /// <summary>
+    /// Locates and interacts with a kendo-switch acting as a radio option by matching the specific label text.
+    /// </summary>
+    /// <param name="labelText">The descriptive label text of the option group.</param>
+    /// <param name="option">The target selection value ("Yes" or "No").</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
     protected new async Task SelectRadioOptionAsync(string labelText, string option)
     {
+        // NOTE: Review debug log
         Log.Debug($"Looking for radiobutton: '{labelText}' with the value: '{option}'");
 
-        // 1. Поиск контейнера (используем более гибкий селектор div.horizontal-field)
+        // 1. Locate the container (using a more flexible selector div.horizontal-field)
         var fieldContainer = Page.Locator("div.horizontal-field")
             .Filter(new() { HasText = labelText });
 
-        // Проверка существования контейнера
+        // Container existence check
         var containerCount = await fieldContainer.CountAsync();
         if (containerCount == 0)
         {
-            // Выведем список всех найденных полей для отладки
+            // Output a list of all found labels for debugging purposes
             var allLabels = await Page.Locator("div.horizontal-field span.label-text").AllInnerTextsAsync();
+            // NOTE: Review debug log
             Log.Debug($"Available lables on the page: {string.Join(", ", allLabels)}");
             throw new Exception($"Field container '{labelText}' not found.");
         }
 
-        // 2. Поиск kendo-switch внутри контейнера
+        // 2. Locate kendo-switch inside the target container
         var kendoSwitch = fieldContainer.Locator("kendo-switch");
         await kendoSwitch.ScrollIntoViewIfNeededAsync();
 
         if (!await kendoSwitch.IsVisibleAsync())
         {
+            // NOTE: Review debug log
             Log.Debug($"[ERROR] Element 'kendo-switch' was found in DOM, but is not visible for the field '{labelText}'.");
         }
 
-        // 3. Чтение текущего состояния
+        // 3. Read current state
         var ariaChecked = await kendoSwitch.GetAttributeAsync("aria-checked");
         bool isCurrentlyChecked = ariaChecked?.ToLower() == "true";
         bool shouldBeChecked = option.Trim().Equals("Yes", StringComparison.OrdinalIgnoreCase);
 
-        // 4. Клик, если состояние нужно изменить
+        // 4. Click if the state needs to be modified
         if (isCurrentlyChecked != shouldBeChecked)
         {
             await kendoSwitch.ClickAsync();
 
-            // Проверка: изменилось ли состояние после клика?
+            // Verification: did the state change after clicking?
             var newState = await kendoSwitch.GetAttributeAsync("aria-checked");
         }
 
-        // Небольшая пауза для Angular/Kendo анимаций и рендеринга зависимых полей
+        // Small pause for Angular/Kendo animations and dependent fields rendering
         await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
     }
+    /// <summary>
+    /// Opens the date-time picker within a localized row context, selects "Today" for date, and inputs specific time values.
+    /// </summary>
+    /// <param name="labelText">The label identifying the target date-time picker field.</param>
+    /// <param name="date">The target date value (unused directly here due to Today button override logic).</param>
+    /// <param name="time">The structural time value containing hours, minutes, and AM/PM designator.</param>
+    /// <param name="rowContext">The specific locator context defining the form row.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
     public async Task SelectDateTimeInPickerAsync(string labelText, DateTime date, TimeOnly time, ILocator rowContext)
     {
-        // 1. Открываем пикер строго внутри нашей изолированной строки panel-line
+        // 1. Open the picker strictly inside our isolated row context (panel-line)
+        // NOTE: Review debug log
         Log.Debug($"Open the calendar {labelText} and try to select a date");
         var fieldContainer = rowContext.Locator("cad-label-value-field").Filter(new() { HasText = labelText });
         await fieldContainer.Locator("button.k-input-button").ClickAsync();
 
-        // 2. Ждем, пока календарь станет видимым
+        // 2. Wait until the calendar becomes visible
         var calendar = Page.Locator("kendo-calendar, .k-calendar-container");
         await calendar.WaitForAsync(new() { State = WaitForSelectorState.Visible });
 
         // =========================================================================
-        // ИСПРАВЛЕНИЕ: КЛИКАЕМ ПО КНОПКЕ "TODAY" ДЛЯ ГАРАНТИРОВАННОГО ВЫБОРА ДАТЫ
+        // FIX: CLICK THE "TODAY" BUTTON FOR GUARANTEED DATE SELECTION
         // =========================================================================
-        Log.Debug("Кликаем по кнопке Today в Kendo календаре...");
+        // NOTE: Review debug log
+        Log.Debug("Clicking the Today button in Kendo calendar...");
 
-        // Находим кнопку Today внутри открытого календаря
+        // Find the Today button inside the open calendar
         var todayButton = calendar.Locator("button.k-calendar-title + button, .k-nav-today, button:has-text('Today')").First;
 
         await todayButton.WaitForAsync(new() { State = WaitForSelectorState.Visible });
         await todayButton.ClickAsync();
 
-        Log.Debug("Кнопка Today успешна нажата. Текущая дата выбрана.");
+        // NOTE: Review debug log
+        Log.Debug("Today button clicked successfully. Current date selected.");
         // =========================================================================
 
-        // 3. Переключаемся на Time (Ваш рабочий код)
+        // 3. Switch to Time (Your functional code)
         var timeTab = Page.Locator("kendo-datetimepicker .k-button").GetByText("Time");
         if (await timeTab.IsVisibleAsync())
         {
             await timeTab.ClickAsync();
         }
 
-        // 4. Подготовка данных времени
+        // 4. Time data preparation
         var englishCulture = System.Globalization.CultureInfo.InvariantCulture;
         string hourWithZero = time.ToString("hh", englishCulture);
         string hourSimple = time.Hour > 12 ? (time.Hour - 12).ToString() : time.Hour.ToString();
@@ -316,10 +390,10 @@ public class DetailsTab : BaseIncidentTabs
         await ttItem.ScrollIntoViewIfNeededAsync();
         await ttItem.ClickAsync();
 
-        // 5. Подтверждение (кнопка Set)
+        // 5. Confirmation (Set button)
         await activePopup.Locator("button.k-time-accept, .k-datetime-footer button:has-text('Set')").ClickAsync();
 
-        // Стабильный барьер закрытия поп-апа
+        // Stable barrier for pop-up closure
         await Page.Locator(".k-animation-container").WaitForAsync(new() { State = WaitForSelectorState.Hidden });
         await Page.Keyboard.PressAsync("Escape");
 
@@ -328,44 +402,71 @@ public class DetailsTab : BaseIncidentTabs
         {
             await kendoPopups.First.WaitForAsync(new() { State = WaitForSelectorState.Hidden, Timeout = 3000 });
         }
-        await Page.WaitForTimeoutAsync(250); // Пауза для фиксации состояния формы Angular
+        await Page.WaitForTimeoutAsync(250); // Pause to fix Angular form state
     }
+
+    /// <summary>
+    /// Reads and stores the text from "All Diagnoses" field, then clears the input area.
+    /// </summary>
+    /// <returns>A task representing the asynchronous operation.</returns>
     public async Task ClearAndSaveDiagnosesAsync()
     {
         var field = GetFieldByLabel("All Diagnoses");
-        AllDiagnises = await field.InputValueAsync(); // Сохраняем в поле класса
+        AllDiagnises = await field.InputValueAsync(); // Save to class field
         await field.ClearAsync();
+        // NOTE: Review debug log
         Log.Debug("All Diagnoses cleared");
     }
 
+    /// <summary>
+    /// Checks whether a specific radio option within a grouped section is selected.
+    /// </summary>
+    /// <param name="groupName">The text identifying the radio group.</param>
+    /// <param name="optionValue">The value attribute of the target radio button.</param>
+    /// <returns>True if the specific option is checked; otherwise, false.</returns>
     public async Task<bool> IsRadioOptionSelectedAsync(string groupName, string optionValue)
     {
-        // Ищет радио-кнопку по тексту группы и значению
+        // Searches for a radio button by group text and value
         return await Page.Locator($"//div[contains(., '{groupName}')]//input[@type='radio' and @value='{optionValue}']").IsCheckedAsync();
     }
 
+    /// <summary>
+    /// Evaluates whether a custom Kendo switch element is toggled to the "On" status.
+    /// </summary>
+    /// <param name="labelText">The label text used to isolate the field container.</param>
+    /// <returns>True if the switch aria-checked attribute is true; otherwise, false.</returns>
     public async Task<bool> IsSwitchOnAsync(string labelText)
     {
-        // Находим контейнер поля по тексту лейбла ("First Aid Administered:")
+        // Locate the field container by the label text ("First Aid Administered:")
         var container = Page.Locator("div.horizontal-field").Filter(new() { HasText = labelText });
 
-        // Внутри контейнера ищем сам kendo-switch
+        // Search for the kendo-switch itself inside the container
         var kendoSwitch = container.Locator("kendo-switch");
 
-        // Считываем значение атрибута aria-checked ("true" или "false")
+        // Read the value of the aria-checked attribute ("true" or "false")
         string ariaChecked = await kendoSwitch.GetAttributeAsync("aria-checked") ?? "false";
 
         return ariaChecked.Equals("true", StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// Retrieves the current textual input value of a field selected by its label text.
+    /// </summary>
+    /// <param name="label">The descriptive label text of the target input.</param>
+    /// <returns>The string value currently residing inside the input field.</returns>
     public async Task<string> GetInputValueByLabelAsync(string label)
     {
         return await GetFieldByLabel(label).InputValueAsync();
     }
 
+    /// <summary>
+    /// Verifies that all data fields in the Details tab match the expected incident details records.
+    /// </summary>
+    /// <param name="expected">The structural dataset containing the expected values for validation.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
     public async Task VerifyDataFieldsAsync(IncidentDetailsInfo expected)
     {
-        // 1. Описания (Textareas)
+        // 1. Descriptions (Textareas)
         if (!string.IsNullOrEmpty(expected.OccurrenceDescription))
             Assert.That(await GetInputValueByLabelAsync("Describe Occurrence"), Is.EqualTo(expected.OccurrenceDescription));
 
@@ -386,7 +487,7 @@ public class DetailsTab : BaseIncidentTabs
         // 3. First Aid
         bool isFirstAidOn = await IsSwitchOnAsync("First Aid Administered:");
         Assert.That(isFirstAidOn, Is.EqualTo(expected.FirstAidAdministered),
-            "Состояние тогла 'First Aid Administered:' не совпадает.");
+            "The state of the toggle 'First Aid Administered:' does not match.");
 
         if (expected.FirstAidAdministered && !string.IsNullOrEmpty(expected.FirstAidDescribe))
         {
@@ -403,7 +504,7 @@ public class DetailsTab : BaseIncidentTabs
         // 4. Transfer
         bool isTransferredOn = await IsSwitchOnAsync("Was Resident Transferred to the Hospital?");
         Assert.That(isTransferredOn, Is.EqualTo(expected.ResidentTransferred),
-            "Состояние тогла 'Was Resident Transferred to the Hospital?' не совпадает.");
+            "The state of the toggle 'Was Resident Transferred to the Hospital?' does not match.");
 
 
         // 5. Actions
@@ -414,14 +515,14 @@ public class DetailsTab : BaseIncidentTabs
             Assert.That(await GetInputValueByLabelAsync("Preventive Action (Long Term Plan)"), Is.EqualTo(expected.PreventiveAction));
 
         // ==========================================
-        // 6. Секция: Relative Notification (Изоляция через Relationship)
+        // 6. Section: Relative Notification (Isolation via Relationship)
         // ==========================================
         var relativeLineContext = Page.Locator("div.panel-line, div.col-wrap")
             .Filter(new() { HasText = "Relationship" });
 
         if (!string.IsNullOrEmpty(expected.RelativeNotified.Name))
         {
-            // Ищем поле внутри изолированной строки по его тексту лейбла
+            // Search for the field inside the isolated row by its label text
             var actualName = await relativeLineContext.Locator("cad-label-value-field")
                 .Filter(new() { HasText = "Name of Relative Notified" })
                 .Locator("input, textarea")
@@ -442,7 +543,7 @@ public class DetailsTab : BaseIncidentTabs
 
         if (!string.IsNullOrEmpty(expected.RelativeNotified.WhoNotified))
         {
-            // Теперь мы гарантированно берем Who Notified из блока родственников, игнорируя блок врача
+            // Now we are guaranteed to take Who Notified from the relatives block, ignoring the doctor block
             var actualWho = await relativeLineContext.Locator("cad-label-value-field")
                 .Filter(new() { HasText = "Who Notified" })
                 .Locator("input, textarea")
@@ -466,7 +567,7 @@ public class DetailsTab : BaseIncidentTabs
         }
 
         // ==========================================
-        // 7. Секция: MD Notification (Изоляция через Who Notified MD)
+        // 7. Section: MD Notification (Isolation via Who Notified MD)
         // ==========================================
         var mdLineContext = Page.Locator("div.panel-line, div.col-wrap")
             .Filter(new() { HasText = "Who Notified MD" });

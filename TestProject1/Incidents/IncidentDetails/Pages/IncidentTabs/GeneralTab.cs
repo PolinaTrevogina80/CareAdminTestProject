@@ -1,15 +1,32 @@
 ﻿using CareAdminTestProject.Incidents.IncidentDetails.Pages.IncidentTabs;
 using Microsoft.Playwright;
-using Microsoft.Testing.Platform.Extensions.Messages;
-using Newtonsoft.Json;
-using Serilog;
-using System.Diagnostics;
-using System.Globalization;
-using static Microsoft.ApplicationInsights.MetricDimensionNames.TelemetryContext;
-using static System.Runtime.InteropServices.JavaScript.JSType;
+using Log = CareAdminTestProject.Common.TestLog;
 
+/// <summary>
+/// Represents the "General" information tab page object within the incident creation or editing workflow.
+/// Encapsulates all UI interaction patterns, form filling operations, and field validation data maps.
+/// </summary>
 public class GeneralTab : BaseIncidentTabs
 {
+    /// <summary>
+    /// Models the comprehensive dataset structure representing all configurable fields on the General incident tab.
+    /// </summary>
+    /// <param name="room">The target resident's room identifier slot.</param>
+    /// <param name="bed">The target resident's bed assignment slot.</param>
+    /// <param name="date">The calendar timestamp tracking when the incident occurred.</param>
+    /// <param name="time">The daily time tracker logging the moment of the event.</param>
+    /// <param name="unit">The corporate facility or medical unit context.</param>
+    /// <param name="location">The concrete physical environment dropdown value where the incident took place.</param>
+    /// <param name="type">The primary categorization type classification of the incident.</param>
+    /// <param name="activity">The resident behavior tracking field immediately preceding the event.</param>
+    /// <param name="summary">The descriptive text matching SBAR summary protocols.</param>
+    /// <param name="supervisor">The entity option position indexing the targeted Supervisor node.</param>
+    /// <param name="chargeNurse">The entity option position indexing the targeted Charge Nurse node.</param>
+    /// <param name="cna">The entity option position indexing the targeted CNA node.</param>
+    /// <param name="injury">The collection array parsing dynamic specific structural injury metrics.</param>
+    /// <param name="LoadedSupervisorName">The contextual runtime string extracted straight from the UI element post-selection.</param>
+    /// <param name="LoadedChargeNurseName">The contextual runtime string extracted straight from the UI element post-selection.</param>
+    /// <param name="LoadedCnaName">The contextual runtime string extracted straight from the UI element post-selection.</param>
     public record IncidentGeneralInfo(
             string? room,
             string? bed,
@@ -25,13 +42,18 @@ public class GeneralTab : BaseIncidentTabs
             int? cna,
             List<InjuryInfo> injury,
 
-            // Новые поля для хранения текстовых значений из UI
+            // Temporary fields using for tests
             string LoadedSupervisorName = "",
             string LoadedChargeNurseName = "",
             string LoadedCnaName = ""
         )
     {
-    public IncidentGeneralInfo GetOnlyRequiredFields()
+        /// <summary>
+        /// Generates a modified shallow copy of the current entity record with all optional fields explicitly wiped.
+        /// Used mainly during mandatory requirement indicators checks.
+        /// </summary>
+        /// <returns>A modified record state where non-essential data elements are reduced to default empty bounds.</returns>
+        public IncidentGeneralInfo GetOnlyRequiredFields()
         {
             return this with
             {
@@ -41,35 +63,53 @@ public class GeneralTab : BaseIncidentTabs
                 chargeNurse = 0,     // Нет звездочки
                 cna = 0              // Нет звездочки
             };
-    
-    }
-};
 
+        }
+    };
+
+    /// <summary>
+    /// Stores precise positional tracking parameters detailing properties for a distinct dynamic grid injury node.
+    /// </summary>
+    /// <param name="injury">The dynamic textual definition mapping the damage event category.</param>
+    /// <param name="site">The anatomical designation locating the area impacted.</param>
+    /// <param name="length">The physical length dimension property parameter.</param>
+    /// <param name="width">The physical width dimension property parameter.</param>
+    /// <param name="depth">The physical depth dimension property parameter.</param>
     public record InjuryInfo(
-        string injury, 
+        string injury,
         string site,
         string length,
         string width,
         string depth
     );
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="GeneralTab"/> page object entity.
+    /// </summary>
+    /// <param name="page">The current operating Playwright automation platform <see cref="IPage"/> abstraction instance context.</param>
     public GeneralTab(IPage page) : base(page) { }
 
+    /// <summary>
+    /// Constructs an execution action dictionary matrix linking form properties to their physical interactive input delegates.
+    /// Crucial for completeness looping routines testing distinct required interface boundaries.
+    /// </summary>
+    /// <param name="data">The reference data state payload container powering execution parameter parameters.</param>
+    /// <returns>A mapped dictionary grid capturing descriptive field strings, execution Task instructions, and mandatory configuration flags.</returns>
     public Dictionary<string, (Func<Task> Action, bool IsRequired)> GetRequiredFieldsMap(IncidentGeneralInfo data)
     {
-        // 1. Статичные поля
+        // Static fields
         var map = new Dictionary<string, (Func<Task> Action, bool IsRequired)>
     {
         { "Room", (() => GetFieldByLabel("Room").FillAsync(data.room), true) },
         { "Bed", (() => GetFieldByLabel("Bed").FillAsync(data.bed), true) },
         
-        // Выбираем "Сегодня" только если дата передана
+        // Selecting "today" if only date is selected
         { "Date of Incident", (async () => { if (data.date.HasValue) await SelectTodayAsync("dateOfIncident"); }, true) },
         
-        // Извлекаем чистое значение через .Value, предварительно проверив на null
+        // Extracting pure .Value, checking by null before
         { "Time of Incident", (async () => { if (data.time.HasValue) await SelectTimeInPickerAsync("timeOfIncident", data.time.Value); }, true) },
         
-        // Извлекаем числовые значения через .Value, если они переданы
+        // Extracting numeric values via .Value, if they were transfered
         { "Supervisor", (async () => { if (data.supervisor.HasValue) await SelectDropdownOptionAsync("Supervisor", data.supervisor.Value); }, true) },
         { "Charge nurse", (async () => { if (data.chargeNurse.HasValue) await SelectDropdownOptionAsync("Charge nurse", data.chargeNurse.Value); }, true) },
         { "CNA", (async () => { if (data.cna.HasValue) await SelectDropdownOptionAsync("CNA", data.cna.Value); }, true) },
@@ -80,7 +120,7 @@ public class GeneralTab : BaseIncidentTabs
         { "SBARSummary", (() => GetFieldByLabel("SBARSummary").FillAsync(data.summary), true) }
     };
 
-        // 2. Добавление динамического списка травм с защитой от null-ссылки
+        // Adding dinamicaly Injury list
         if (data.injury != null)
         {
             for (int i = 0; i < data.injury.Count; i++)
@@ -102,29 +142,35 @@ public class GeneralTab : BaseIncidentTabs
     }
 
 
+    /// <summary>
+    /// Executes sequential UI text insertions and component operations to comprehensively fill basic form attributes.
+    /// Captures actual rendering names inside structural layout zones for downstream logging evaluation steps.
+    /// </summary>
+    /// <param name="generalInfo">The instruction sequence blueprint detailing target state field entries.</param>
+    /// <returns>An adjusted record snapshot holding contextual post-selection personnel values obtained in real time.</returns>
     public async Task<IncidentGeneralInfo> FillBasicInfoAsync(IncidentGeneralInfo generalInfo)
     {
-        // поля для хранения текстовых значений из UI
+        // Fields for saving text values form UI
         string supervisorName = "";
         string chargeNurseName = "";
         string cnaName = "";
 
-        // Заполняем текстовые поля, только если они не пустые
+        // Fill in text fields if only they are not empty
         if (!string.IsNullOrEmpty(generalInfo.room))
             await GetFieldByLabel("Room").FillAsync(generalInfo.room);
 
         if (!string.IsNullOrEmpty(generalInfo.bed))
             await GetFieldByLabel("Bed").FillAsync(generalInfo.bed);
 
-        // Заполняем дропдауны, только если передано значение
+        // Fill in dropdwns if only they are not empty
         if (!string.IsNullOrEmpty(generalInfo.unit))
             await SelectDropdownOptionAsync("Unit", generalInfo.unit);
 
         if (!string.IsNullOrEmpty(generalInfo.location))
-            await SelectDropdownOptionAsync("Location of incident", generalInfo.location);
+            await SelectDropdownOptionAsync("Location of Incident", generalInfo.location);
 
         if (!string.IsNullOrEmpty(generalInfo.type))
-            await SelectDropdownOptionAsync("Type of incident", generalInfo.type);
+            await SelectDropdownOptionAsync("Type of Incident", generalInfo.type);
 
         if (!string.IsNullOrEmpty(generalInfo.activity))
             await SelectDropdownOptionAsync("Activity Prior", generalInfo.activity);
@@ -132,39 +178,38 @@ public class GeneralTab : BaseIncidentTabs
         if (!string.IsNullOrEmpty(generalInfo.summary))
             await GetFieldByLabel("SBARSummary").FillAsync(generalInfo.summary);
 
-        // Обработка Даты: выбираем "Сегодня" только если date не null
+        // Date proccessing: choose "Today" if only date is not null
         if (generalInfo.date.HasValue)
         {
             await SelectTodayAsync("dateOfIncident");
         }
 
-        // Обработка Времени: выбираем время только если time не null
+        // Time processing: choose time if only it is not null
         if (generalInfo.time.HasValue && generalInfo.date.HasValue)
         {
             await SelectTimeInPickerAsync("timeOfIncident", generalInfo.time.Value);
         }
 
-        // Числовые дропдауны заполняем, только если они указаны
+        // Fill in staff dropdowns if only they are not empty
         if (generalInfo.supervisor.HasValue)
         {
             await SelectDropdownOptionAsync("Supervisor", generalInfo.supervisor.Value);
-            // Считываем текст, который фактически появился в поле после выбора
             supervisorName = await GetFieldByLabel("Supervisor").InnerTextAsync();
         }
-        
+
         if (generalInfo.chargeNurse.HasValue)
         {
             await SelectDropdownOptionAsync("Charge nurse", generalInfo.chargeNurse.Value);
             chargeNurseName = await GetFieldByLabel("Charge nurse").InnerTextAsync();
         }
-        
+
         if (generalInfo.cna.HasValue)
         {
             await SelectDropdownOptionAsync("CNA", generalInfo.cna.Value);
             cnaName = await GetFieldByLabel("CNA").InnerTextAsync();
         }
 
-        // Заполнение травм
+        // Filling in Injuries section
         if (generalInfo.injury != null && generalInfo.injury.Count > 0)
         {
             for (int i = 0; i < generalInfo.injury.Count; i++)
@@ -187,41 +232,47 @@ public class GeneralTab : BaseIncidentTabs
     }
 
 
+    /// <summary>
+    /// Adds information about a specific injury based on its index.
+    /// </summary>
+    /// <param name="i">The zero-based index of the injury fields row.</param>
+    /// <param name="injury">The injury details containing type, site, and dimensions.</param>
+    /// <returns>A task that represents the asynchronous operation.</returns>
     public async Task AddInjuryAsync(int i, InjuryInfo injury)
     {
-        // Если кнопка "Add Injury" общая, кликаем её просто так. 
-        // Но судя по циклу в FillBasicInfoAsync, вы уже кликаете её там.
-        // Если метод вызывается ВНУТРИ цикла, повторный клик здесь может быть лишним.
-
+        // Selecting dropdowns for Injury line
         await SelectDropdownOptionAsync("Injuries Sustained", injury.injury, i);
         await SelectDropdownOptionAsync("Site of Injury", injury.site, i);
 
-        // Для обычных полей ввода (Fill) оставляем как было:
+        // For regular input fields (Fill) we leave it as it was:
         await GetFieldByLabel("Length (Centimeters)").Nth(i).FillAsync(injury.length);
         await GetFieldByLabel("Width (Centimeters)").Nth(i).FillAsync(injury.width);
         await GetFieldByLabel("Depth (Centimeters)").Nth(i).FillAsync(injury.depth);
     }
 
-
-
+    /// <summary>
+    /// Selects the current date ("Today") from a Kendo UI calendar popup.
+    /// </summary>
+    /// <param name="nameAttribute">The name attribute or identifier of the date control.</param>
+    /// <returns>A task that represents the asynchronous operation.</returns>
     public async Task SelectTodayAsync(string nameAttribute)
     {
 
         await ClickControlIcon(nameAttribute);
 
-        // Упрощаем локатор до самого базового, который виден в коде на скриншоте
-        // Инициализируем локатор БЕЗ .Last, чтобы не упасть раньше времени
+        // Simplify the locator to the most basic one visible in the screenshot code
+        // Initialize the locator WITHOUT .Last to avoid premature failures
         var popupSearch = Page.Locator("kendo-popup");
 
         try
         {
-            // Ждем появления хотя бы одного попапа в DOM
+            // Wait for at least one popup to appear in the DOM
             await popupSearch.First.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5000 });
 
-            // Теперь берем последний активный
+            // Now take the last active one
             var popup = popupSearch.Last;
-            // 3. Поиск кнопки "Today"
-            // В Kendo UI кнопка может быть как button, так и span внутри нее. Используем текст.
+            // 3. Search for the "Today" button
+            // In Kendo UI, the button can be either a button element or a span inside it. We use text.
             var todayBtn = popup.GetByRole(AriaRole.Button).Filter(new() { HasText = "Today" });
 
             if (await todayBtn.CountAsync() > 0)
@@ -230,60 +281,77 @@ public class GeneralTab : BaseIncidentTabs
             }
             else
             {
-                // Резервный вариант, если это не Button по роли
+                // Fallback option if it is not a Button by role
                 await popup.Locator(".k-calendar-nav-today, .k-nav-today").ClickAsync(new() { Force = true });
             }
 
-            // 4. Ждем закрытия
+            // 4. Wait for closure
             await popup.WaitForAsync(new() { State = WaitForSelectorState.Hidden });
+            // NOTE: Review debug log
             Log.Debug($"Date 'Today' is selected for the field {nameAttribute}");
         }
         catch (Exception ex)
         {
             Log.Error($"Error while operating with the calendar  {ex.Message}");
-            // Делаем скриншот именно в момент ошибки внутри метода
+            // Take a screenshot precisely at the moment of error inside the method
             await Page.ScreenshotAsync(new() { Path = $"popup_error_{nameAttribute}.png" });
             throw;
         }
     }
 
+    /// <summary>
+    /// Selects a specific date in an Angular Material calendar picker. Not quiet ready yet.
+    /// </summary>
+    /// <param name="label">The label text of the date field.</param>
+    /// <param name="date">The target date time value to select.</param>
+    /// <returns>A task that represents the asynchronous operation.</returns>
     public async Task SelectDateInCalendarAsync(string label, DateTime date)
     {
-        // 1. Открываем календарь
+        // Open the calendar
         await GetFieldIcon(label).ClickAsync();
 
-        // 2. Переходим в режим выбора года/месяца (клик по заголовку, например "FEB 2026")
+        // 2. Switch to year/month selection mode (click the header, for example "FEB 2026")
         var periodButton = Page.Locator(".mat-calendar-period-button");
         await periodButton.ClickAsync();
 
-        // 3. Выбираем год
+        // 3. Select the year
         await Page.Locator(".mat-calendar-body-cell")
                    .GetByText(date.Year.ToString(), new() { Exact = true })
                    .ClickAsync();
 
-        // 4. Выбираем месяц (сокращенное название, например "MAY" или "МАЙ")
-        // Формат зависит от локализации вашего приложения
+        // 4. Select the month (abbreviated name, for example "MAY")
+        // The format depends on your application's localization
         var monthName = date.ToString("MMM", System.Globalization.CultureInfo.InvariantCulture).ToUpper();
         await Page.Locator(".mat-calendar-body-cell")
                    .GetByText(monthName, new() { Exact = true })
                    .ClickAsync();
 
-        // 5. Выбираем день
+        // 5. Select the day
         await Page.Locator(".mat-calendar-body-cell")
                    .GetByText(date.Day.ToString(), new() { Exact = true })
                    .ClickAsync();
     }
 
+    /// <summary>
+    /// Clears pre-filled "Room" and "Bed" fields for validation purposes.
+    /// </summary>
+    /// <returns>A task that represents the asynchronous operation.</returns>
     public async Task ClearPreFilledFieldsAsync()
     {
         await GetFieldByLabel("Room").ClearAsync();
         await GetFieldByLabel("Bed").ClearAsync();
+        // NOTE: Review debug log
         Log.Debug("Pre-filled fields are cleared for falidation");
     }
 
+    /// <summary>
+    /// Verifies that the actual values in the form fields match the expected incident data.
+    /// </summary>
+    /// <param name="expected">The data object containing expected values for verification.</param>
+    /// <returns>A task that represents the asynchronous operation.</returns>
     public async Task VerifyDataFieldsAsync(IncidentGeneralInfo expected)
     {
-        // Проверяем Room, только если он был заполнен в объекте данных
+        // Check fields only if it was filled in the data object
         if (!string.IsNullOrEmpty(expected.room))
         {
             var actualRoom = await GetFieldByLabel("Room").InputValueAsync();
@@ -298,14 +366,14 @@ public class GeneralTab : BaseIncidentTabs
 
         if (!string.IsNullOrEmpty(expected.location))
         {
-            // InnerTextAsync или InputValueAsync в зависимости от типа дропдауна
+            // InnerTextAsync or InputValueAsync depending on the dropdown type
             var actualLocation = await GetFieldByLabel("Location of incident").InnerTextAsync();
             Assert.That(actualLocation, Does.Contain(expected.location));
         }
 
         if (!string.IsNullOrEmpty(expected.unit))
         {
-            // InnerTextAsync или InputValueAsync в зависимости от типа дропдауна
+            // InnerTextAsync or InputValueAsync depending on the dropdown type
             var actualUnit = await GetFieldByLabel("Unit").InnerTextAsync();
             Assert.That(actualUnit, Does.Contain(expected.unit));
         }
@@ -314,7 +382,7 @@ public class GeneralTab : BaseIncidentTabs
         {
             var actualDate = await GetFieldByLabel("Date of Incident").InputValueAsync();
 
-            // Добавляем CultureInfo.InvariantCulture, чтобы разделителем всегда был слэш '/'
+            // Add CultureInfo.InvariantCulture so that the separator is always a slash '/'
             string expectedDateStr = expected.date.Value.ToString("M/d/yyyy", System.Globalization.CultureInfo.InvariantCulture);
 
             Assert.That(actualDate, Is.EqualTo(expectedDateStr));
@@ -322,11 +390,9 @@ public class GeneralTab : BaseIncidentTabs
 
         if (expected.time.HasValue)
         {
-            // ИСПОЛЬЗУЕМ СТРОКУ С UI: "Time of Incident" вместо "timeOfIncident"
             var actualTime = await GetFieldByLabel("Time of Incident").InputValueAsync();
 
-            // На скриншоте время отображается в формате "11:12 AM". 
-            // Приводим TimeOnly к строке соответствующего формата для сверки:
+            // Convert TimeOnly to a string of the corresponding format for verification:
             string expectedTimeStr = expected.time.Value.ToString("h:mm tt", System.Globalization.CultureInfo.InvariantCulture);
 
             Assert.That(actualTime, Is.EqualTo(expectedTimeStr));
@@ -338,6 +404,7 @@ public class GeneralTab : BaseIncidentTabs
             Assert.That(actualSummary, Is.EqualTo(expected.summary));
         }
 
+        // Charge Supervisor verification
         if (!string.IsNullOrEmpty(expected.LoadedSupervisorName))
         {
             var actualSupervisor = await GetFieldByLabel("Supervisor").InnerTextAsync();
@@ -345,7 +412,7 @@ public class GeneralTab : BaseIncidentTabs
                 "Supervisor draft text mismatch!");
         }
 
-        // Проверка Charge Nurse
+        // Charge Nurse verification
         if (!string.IsNullOrEmpty(expected.LoadedChargeNurseName))
         {
             var actualChargeNurse = await GetFieldByLabel("Charge nurse").InnerTextAsync();
@@ -353,7 +420,7 @@ public class GeneralTab : BaseIncidentTabs
                 "Charge nurse draft text mismatch!");
         }
 
-        // Проверка CNA
+        // CNA verification
         if (!string.IsNullOrEmpty(expected.LoadedCnaName))
         {
             var actualCna = await GetFieldByLabel("CNA").InnerTextAsync();

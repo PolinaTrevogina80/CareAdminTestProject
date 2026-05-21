@@ -1,159 +1,178 @@
 ﻿using CareAdminTestProject.Incidents.IncidentDetails.Steps;
 using Microsoft.Extensions.Logging;
 using Microsoft.Playwright;
-using TestProject1.Common;
+using CareAdminTestProject.Common;
 using static IncidentDataFactory;
-using static System.Net.Mime.MediaTypeNames;
+using Log = CareAdminTestProject.Common.TestLog;
 
-[TestFixture]
-public class BaseIncidentTests : BaseTest
+namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
 {
-
-    public IncidentDetailsSteps steps;
-    public IncidentTestData data;
-    public IncidentCreatePage.ResidentInfo resident;
-
-    [SetUp]
-    public async Task Setup()
+    /// <summary>
+    /// Serves as the functional base suite for incident automation tests.
+    /// Orchestrates standard multi-tab setups, shared pre-requisites, and test execution workflows.
+    /// </summary>
+    [TestFixture]
+    public class BaseIncidentTests : BaseTest
     {
-        Log.LogDebug($"Make Setup, switch to Carrilon");
+        /// <summary> The main high-level BDD step layer manager scoped to the current test context execution loop. </summary>
+        public IncidentDetailsSteps steps;
 
-        await EnsureFacilitySelected("Carillon");
+        /// <summary> The complex reference test data payload record model used to populate forms during execution. </summary>
+        public IncidentTestData data;
 
-        steps = new IncidentDetailsSteps(Page);
-        await steps.NavigateToTrackerViaMenu();
-        await steps.OpenNewIncidentAsync();
-        resident = await steps.SelectResidentAsync(1);
-        data = IncidentDataFactory.CreateDefaultFall(resident);
-    }
+        /// <summary> Biographical and room placement location constraints captured for the target resident profile. </summary>
+        public IncidentCreatePage.ResidentInfo resident;
 
-    [Test]
-    public async Task ShouldOpenIncidentDashboardFromHomePage()
-    {
-        // Вы уже авторизованы! Переходим сразу к делу
-        Log.LogDebug("Open HOME page");
-        await Page.GotoAsync("/");
+        private static int _globalResidentCounter = 0;
 
-        Log.LogDebug("Open A/I Page");
-
-        await Page.GetByAltText("Accident/Incident").ClickAsync();
-
-        Log.LogDebug("Check Main Dashboard is opened");
-        await Expect(Page).ToHaveURLAsync(new System.Text.RegularExpressions.Regex(".*dashboards/incident-main"));
-        await Expect(Page.Locator("cad-breadcrumb").GetByText("Main Dashboard")).ToBeVisibleAsync();
-    }
-
-    [Test]
-    public async Task SwitchToCarrillonTest()
-    {
-        // 1. ПРЕДУСЛОВИЕ: Убеждаемся, что изначально выбрано Cassena Care
-        // (Это гарантирует, что тесту точно ПРИДЕТСЯ переключать значение)
-        //await EnsureCassenaCareSelected();
-        var facility = "Carillon";
-
-        // 2. ДЕЙСТВИЕ: Переключаем на Carillon
-        await SelectInTreeAsync(facility);
-
-        // 3. ПРОВЕРКА: Значение действительно изменилось
-        await Expect(Page.Locator(".k-input-value-text").First)
-            .ToContainTextAsync(facility);
-        Log.LogDebug("Switching to Carillon successful");
-
-        await GetCurrentSelectionAsync();
-    }
-
-    [Test]
-    public async Task SwitchToCassenaCareTest()
-    {
-
-        // Переключаем обратно на Cassena Care
-        await SelectInTreeAsync("Cassena Care");
-
-        // ПРОВЕРКА: Значение изменилось на Cassena Care
-        await Expect(Page.Locator(".k-input-value-text").First)
-            .ToContainTextAsync("Cassena Care");
-        Log.LogInformation("Switching to Cassena Care successful");
-
-        await GetCurrentSelectionAsync();
-    }
-
-    public async Task SelectFacilityAsync(string facilityName)
-    {
-        await Page.GotoAsync("/accident-incident/dashboards/incident-main");
-        var dropdown = Page.Locator("kendo-dropdowntree.k-dropdowntree").First;
-
-        // Используем ваш проверенный способ с Evaluate
-        await dropdown.EvaluateAsync("el => el.click()");
-
-        var option = Page.Locator(".k-popup .k-treeview-leaf, .k-animation-container .k-treeview-leaf")
-                         .GetByText(facilityName, new() { Exact = true });
-
-        await option.WaitForAsync(new() { State = WaitForSelectorState.Visible });
-        await option.ClickAsync();
-        Log.LogInformation($"Switching to {facilityName} successful");
-
-        // Ждем обновления текста в селекторе
-        await Expect(Page.Locator(".k-input-value-text").First).ToContainTextAsync(facilityName);
-    }
-
-    public async Task SelectInTreeAsync(string targetName)
-    {
-        await Page.GotoAsync("/accident-incident/dashboards/incident-main");
-
-        var dropdown = Page.Locator("kendo-dropdowntree.k-dropdowntree").First;
-        await dropdown.WaitForAsync(new() { State = WaitForSelectorState.Attached });
-
-        // Открываем список через JS (самый стабильный ваш метод)
-        await dropdown.EvaluateAsync("el => el.click()");
-
-        // Ищем пункт в выпадающем окне
-        var option = Page.Locator(".k-popup .k-treeview-leaf, .k-animation-container .k-treeview-leaf")
-                         .GetByText(targetName, new() { Exact = true });
-
-        await option.WaitForAsync(new() { State = WaitForSelectorState.Visible });
-        await option.ClickAsync();
-
-
-        // Проверяем, что текст в селекторе изменился
-        await Expect(Page.Locator(".k-input-value-text").First)
-            .ToContainTextAsync(targetName, new() { Timeout = 10000 });
-
-        Log.LogInformation($"{targetName} selected");
-    }
-
-    public async Task EnsureCassenaCareSelected()
-    {
-        const string target = "Cassena Care";
-        if (await GetCurrentSelectionAsync() != target)
+        /// <summary>
+        /// Executes foundational test pre-requisites before each automated test case runs, 
+        /// enforcing target facility selections, opening new blank forms, and caching model references.
+        /// </summary>
+        /// <returns>A task representing the asynchronous operation.</returns>
+        [SetUp]
+        public async Task Setup()
         {
-            Log.LogDebug($"[SETUP] Переключаем на группу: {target}");
-            await SelectInTreeAsync(target);
+            Log.LogDebug($"Executing Setup lifecycle sequence: switching to Carillon facility area...");
+
+            await EnsureFacilitySelected("Carillon");
+
+            // Instantiating the step runner, mapping it to the thread-isolated Page instance
+            steps = new IncidentDetailsSteps(Page);
+            await steps.NavigateToTrackerViaMenu();
+            await steps.OpenNewIncidentAsync();
+
+            // ДИНАМИЧЕСКИЙ РАСЧЕТ ИНДЕКСА РЕЗИДЕНТА ДЛЯ ПОТОКА:
+            // Берем хэш-код текущего потока (он уникален для каждого параллельного воркера)
+            int threadId = Environment.CurrentManagedThreadId;
+
+            // Оператор % гарантирует, что индекс ВСЕГДА будет в диапазоне от 0 до 4, независимо от ID потока
+            int currentTestRunIndex = System.Threading.Interlocked.Increment(ref _globalResidentCounter);
+
+            // Используем оператор %, чтобы если тестов станет больше 45, индексы плавно пошли по второму кругу
+            // Начинаем с индекса 1 (пропуская 0, если первый элемент в дропдауне — это какой-то пустой плейсхолдер)
+            int residentIndex = (currentTestRunIndex % 45) + 1;
+
+            Log.LogDebug($"[PARALLEL ENGINE] Test '{TestContext.CurrentContext.Test.Name}' triggered. " +
+                         $"Global Run Number: {currentTestRunIndex}. Selecting unique Resident Index: {residentIndex}");
+            // =========================================================================
+
+
+            Log.LogDebug($"[THREAD PARALLEL] Thread ID {threadId} evaluates to Resident Index: {residentIndex}");
+
+            resident = await steps.SelectResidentAsync(residentIndex);
+            data = IncidentDataFactory.CreateDefaultFall(resident);
         }
-    }
 
-    public async Task EnsureFacilitySelected(string facilityName)
-    {
-        await Page.GotoAsync("/accident-incident/dashboards/incident-main");
-        var currentText = await Page.Locator(".k-input-value-text").First.TextContentAsync();
-
-        if (currentText?.Trim() != facilityName)
+        /// <summary>
+        /// Navigates to the incident main dashboard and dynamically handles a Kendo DropdownTree overlay element to switch the active facility selection.
+        /// </summary>
+        /// <param name="facilityName">The exact exact text label string of the destination facility node.</param>
+        /// <returns>A task representing the asynchronous operation.</returns>
+        public async Task SelectFacilityAsync(string facilityName)
         {
-            Log.LogDebug($"Контекст - Кассена Кэр");
-            Log.LogDebug($"[SETUP] Переключаем учреждение на {facilityName}");
-            await SelectInTreeAsync(facilityName);
-            await GetCurrentSelectionAsync();
+            await Page.GotoAsync("/accident-incident/dashboards/incident-main");
+            var dropdown = Page.Locator("kendo-dropdowntree.k-dropdowntree").First;
 
+            // Utilizing JavaScript evaluation execution injection to guarantee stable clicks on overlay triggers
+            await dropdown.EvaluateAsync("el => el.click()");
+
+            var option = Page.Locator(".k-popup .k-treeview-leaf, .k-animation-container .k-treeview-leaf")
+                             .GetByText(facilityName, new() { Exact = true });
+
+            await option.WaitForAsync(new() { State = WaitForSelectorState.Visible });
+            await option.ClickAsync();
+            Log.LogInformation($"Switching to facility context '{facilityName}' completed successfully.");
+
+            // Synchronize execution bounds until target text modifications update completely within the selector template
+            await Expect(Page.Locator(".k-input-value-text").First).ToContainTextAsync(facilityName);
         }
-    }
 
 
-    private async Task<string> GetCurrentSelectionAsync()
-    {
-       // await Page.GotoAsync("/accident-incident/dashboards/incident-main");
-        var text = await Page.Locator(".k-input-value-text").First.TextContentAsync();
-        Log.LogDebug($"Сейчас контекст: {text}");
 
-        return text?.Trim() ?? string.Empty;
+        /// <summary>
+        /// Navigates to the incident dashboard layout page and uses reliable asynchronous JavaScript evaluation 
+        /// to expand the custom Kendo DropdownTree overlay element before selecting a specific target facility node.
+        /// </summary>
+        /// <param name="targetName">The exact exact text label string of the target facility selection choice.</param>
+        /// <returns>A task representing the asynchronous operation.</returns>
+        public async Task SelectInTreeAsync(string targetName)
+        {
+            await Page.GotoAsync("/accident-incident/dashboards/incident-main");
+
+            var dropdown = Page.Locator("kendo-dropdowntree.k-dropdowntree").First;
+            await dropdown.WaitForAsync(new() { State = WaitForSelectorState.Attached });
+
+            // Open the selection item list via JavaScript (your most stable interaction strategy)
+            await dropdown.EvaluateAsync("el => el.click()");
+
+            // Resolve the target list option row within the expanded dropdown window layout layers
+            var option = Page.Locator(".k-popup .k-treeview-leaf, .k-animation-container .k-treeview-leaf")
+                             .GetByText(targetName, new() { Exact = true });
+
+            await option.WaitForAsync(new() { State = WaitForSelectorState.Visible });
+            await option.ClickAsync();
+
+
+            // Verify that the inner text displayed inside the selector element changes to match target values
+            await Expect(Page.Locator(".k-input-value-text").First)
+                .ToContainTextAsync(targetName, new() { Timeout = 10000 });
+
+            Log.LogInformation($"{targetName} selected");
+        }
+
+        /// <summary>
+        /// Reads current interface configurations and enforces a switch selection 
+        /// over to the "Cassena Care" group context if it is not already designated as active.
+        /// </summary>
+        /// <returns>A task representing the asynchronous operation.</returns>
+        public async Task EnsureCassenaCareSelected()
+        {
+            const string target = "Cassena Care";
+            if (await GetCurrentSelectionAsync() != target)
+            {
+                // NOTE: Review debug log
+                Log.LogDebug($"[SETUP] Toggling selection properties toward parent group context: {target}");
+                await SelectInTreeAsync(target);
+            }
+        }
+
+        /// <summary>
+        /// Optimizes setup pipelines by assessing current active select text content 
+        /// and skipping rendering updates if the target facility choice is verified as already chosen.
+        /// </summary>
+        /// <param name="facilityName">The exact user-facing string description name of the target facility node.</param>
+        /// <returns>A task representing the asynchronous operation.</returns>
+        public async Task EnsureFacilitySelected(string facilityName)
+        {
+            await Page.GotoAsync("/accident-incident/dashboards/incident-main");
+            var currentText = await Page.Locator(".k-input-value-text").First.TextContentAsync();
+
+            if (currentText?.Trim() != facilityName)
+            {
+                // NOTE: Review debug log
+                Log.LogDebug($"Current facility context is evaluated as - Cassena Care");
+                // NOTE: Review debug log
+                Log.LogDebug($"[SETUP] Actively switching institutional facility work scope to '{facilityName}'");
+                await SelectInTreeAsync(facilityName);
+                await GetCurrentSelectionAsync();
+
+            }
+        }
+
+
+        /// <summary>
+        /// Extracts and tracks the active text content currently populated inside the primary Kendo selector field box.
+        /// </summary>
+        /// <returns>A trimmed string mapping the exact selected label value choice name, or empty if properties evaluate as null.</returns>
+        public async Task<string> GetCurrentSelectionAsync()
+        {
+            // await Page.GotoAsync("/accident-incident/dashboards/incident-main");
+            var text = await Page.Locator(".k-input-value-text").First.TextContentAsync();
+            // NOTE: Review debug log
+            Log.LogDebug($"Active work scope selection context reads as: {text}");
+
+            return text?.Trim() ?? string.Empty;
+        }
     }
 }
-

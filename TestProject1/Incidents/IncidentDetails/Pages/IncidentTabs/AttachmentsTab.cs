@@ -1,12 +1,37 @@
 ﻿using CareAdminTestProject.Incidents.IncidentDetails.Pages.IncidentTabs;
 using Microsoft.Playwright;
-using Serilog;
-using System.IO;
+using Log = CareAdminTestProject.Common.TestLog;
 
+/// <summary>
+/// Represents the Attachments tab within the incident reporting form.
+/// Provides methods to handle file uploading, dialog control management, and operational category assignments.
+/// <para><b>--- METHOD DIRECTORY & QUICK LINKS ---</b></para>
+/// <list type="bullet">
+///   <item> <description> Context Pre-Configuration Setup Hook: <see cref="AttachmentsTab"/> </description> </item>
+///   <item> <description> Test Setup Lifecycle Initializer: <see cref="BaseSetup"/> </description> </item>
+///   <item> <description> Inline Session Expiration Interrogator: <see cref="RefreshTokenIfNeeded"/> </description> </item>
+///   <item> <description> Context Tear-Down Capture Automation: <see cref="TearDown"/> </description> </item>
+/// </list>
+/// </summary>
 public class AttachmentsTab : BaseIncidentTabs
 {
+    /// <summary>
+    /// Initializes a new instance of the <see cref="AttachmentsTab"/> class.
+    /// </summary>
+    /// <para><b>--- METHOD DIRECTORY & QUICK LINKS ---</b></para>
+    /// <list type="bullet">
+    ///   <item> <description> Permitted File Classifications: <see cref="AttachmentCategories"/> </description> </item>
+    ///   <item> <description> Document Upload Stream Handler: <see cref="UploadAttachmentAsync(string)"/> </description> </item>
+    ///   <item> <description> Single Category Processing Broadcast: <see cref="AssignCategoriesToAllPagesAsync(string, string?)"/> </description> </item>
+    ///   <item> <description> Multi-Category Sequenced Mapping Step: <see cref="AssignCategoriesToAllPagesAsync(IReadOnlyList{string}, string?)"/> </description> </item>
+    ///   <item> <description> Post-Upload Display Verification Node: <see cref="VerifyAttachmentIsDisplayedAsync(string)"/> </description> </item>
+    /// </list>
+    /// <param name="page">The Playwright page instance.</param>
     public AttachmentsTab(IPage page) : base(page) { }
 
+    /// <summary>
+    /// Holds the static list of authorized document type attachment classification categories.
+    /// </summary>
     public static readonly List<string> AttachmentCategories = new()
     {
         "Accident Report",
@@ -24,17 +49,16 @@ public class AttachmentsTab : BaseIncidentTabs
         "Summary"
     };
 
-    // Локатор кнопки "+" (Add Attachment)
-    private ILocator AddButton => Page.Locator("button.mdc-icon-button:has(mat-icon[data-mat-icon-name='add-icon'])");
-
     /// <summary>
-    /// Загружает файл, используя путь к сохраненному ранее отчету
+    /// Uploads a local document file using the file path string captured during earlier execution reporting workflows.
     /// </summary>
-    /// <param name="filePath">Полный путь к файлу (tempPath из прошлого шага)</param>
+    /// <param name="filePath">The absolute system path to the target file (e.g., tempPath from the previous step).</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    /// <exception cref="FileNotFoundException">Thrown if the provided target path cannot be resolved as an existing file on disk.</exception>
     public async Task UploadAttachmentAsync(string filePath)
     {
         if (!File.Exists(filePath))
-            throw new FileNotFoundException($"Файл не найден: {filePath}");
+            throw new FileNotFoundException($"File not found: {filePath}");
 
         string fileName = Path.GetFileName(filePath);
 
@@ -43,89 +67,113 @@ public class AttachmentsTab : BaseIncidentTabs
             Has = Page.Locator("mat-icon[data-mat-icon-name='add-icon'], mat-icon:has-text('add')")
         });
         await addButton.ClickAsync();
+        Log.Debug("Attach button is clicked");
 
-        // Ищем строгое совпадение, чтобы не путать с подзаголовком
+        // Search for an exact text match to avoid layout collision ambiguities with subheaders
         var popupHeader = Page.GetByText("Upload a file", new() { Exact = true });
         await popupHeader.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 10000 });
 
-        // 1. Ожидаем открытие диалога и выбираем файл
+        // 1. Await dynamic overlay dialog generation and assign the local file to the input element target
         var fileInput = Page.Locator("cad-incident-add-attachment-dialog input[type='file']");
         await fileInput.SetInputFilesAsync(filePath);
 
-        // 3. Ждем, когда файл отобразится в списке (селектор .files-list из вашего DOM)
+        // 2. Synchronize execution thread until the uploaded target file name renders inside the active queue grid list (.files-list inside your DOM)
         fileName = Path.GetFileName(filePath);
         var fileItem = Page.Locator(".files-list").GetByText(fileName);
         await fileItem.WaitForAsync(new() { State = WaitForSelectorState.Visible });
 
-        // 2. ПРОВЕРКА: Ждем, когда имя файла появится в списке загруженных
+        // 3. VERIFICATION CHECKPOINT: Await explicit element visibility of the specific filename string inside the attachment wizard container
         var uploadedFile = Page.Locator("cad-incident-add-attachment-dialog").GetByText(fileName);
 
-        // Ждем, пока текст файла станет видимым
+        // Wait until the text node representing the active uploaded file switches to a visible state
         await uploadedFile.WaitForAsync(new() { State = WaitForSelectorState.Visible });
+        Log.Information("Attachment file selected");
 
 
-        // 3. Нажимаем Next
+        // 4. Click the "Next" step progression button
         var nextButton = Page.GetByRole(AriaRole.Button, new() { Name = "Next" });
         await nextButton.WaitForAsync(new() { State = WaitForSelectorState.Visible });
         await nextButton.ClickAsync(new() { Timeout = 180000 });
     }
 
+    /// <summary>
+    /// Overload helper method configured to broadcast and apply a single target category type universally across every file page container line.
+    /// </summary>
+    /// <param name="categoryName">The explicit target category descriptor label value to apply.</param>
+    /// <param name="notes">Optional supplementary string text notes to attach to document pages.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
     public async Task AssignCategoriesToAllPagesAsync(string categoryName, string? notes = null)
     {
-        Log.Debug($"Вызван метод для применения одной категории '{categoryName}' ко всем страницам.");
+        // NOTE: Review debug log
+        Log.Debug($"Method invoked to apply a single category classification '{categoryName}' across all document pages.");
 
-        // Оборачиваем одну категорию в список из одного элемента
+        // Wrap the single string parameter constraint value inside an isolated single-element collection list container
         IReadOnlyList<string> categoryNames = new List<string> { categoryName };
 
-        // Передаем в перегрузку, которая умеет работать со списками
+        // Delegate execution workflow forward to the primary collection processor method overload structure
         await AssignCategoriesToAllPagesAsync(categoryNames, notes);
     }
 
+    /// <summary>
+    /// Sequentially steps through document pages inside the dynamic assignment modal overlay dialog 
+    /// and maps specific index or single configuration categories to individual pages.
+    /// </summary>
+    /// <param name="categoryNames">The collection array of target classification categories to apply sequentially.</param>
+    /// <param name="notes">The operational string note value to inject if the fallback category choice evaluates to 'Other'.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
     public async Task AssignCategoriesToAllPagesAsync(IReadOnlyList<string> categoryNames, string? notes = null)
     {
-        Log.Debug("Начинаем процесс полистного присвоения списка категорий.");
+        // NOTE: Review debug log
+        Log.Debug("Starting the process of page-by-page category list assignment.");
 
-        // 1. Находим контейнер попапа
+        // 1. Locate the dialog overlay container wrapper
         var dialog = Page.Locator(".incident-assign-pdf-to-category").First;
         await dialog.WaitForAsync();
-        Log.Debug("Попап Assign Pages найден и отображен.");
+        // NOTE: Review debug log
+        Log.Debug("Assign Pages popup found and displayed.");
 
-        // 2. Ищем текст пагинации для определения количества страниц в PDF
+        // 2. Query target pagination text node metrics to identify total document pages inside the PDF layout stream
         var paginationElement = dialog.Locator(".pagination-wrapper, .page-configuration, .pagination").Filter(new() { Has = Page.Locator("mat-icon") }).First;
         var paginationText = await paginationElement.InnerTextAsync();
-        Log.Debug($"Текст пагинации извлечен: '{paginationText}'");
+        // NOTE: Review debug log
+        Log.Debug($"Pagination text extracted: '{paginationText}'");
 
         var match = System.Text.RegularExpressions.Regex.Match(paginationText, @"of\s+(\d+)");
         int totalPages = match.Success ? int.Parse(match.Groups[1].Value) : 1;
-        Log.Debug($"Определено общее количество страниц: {totalPages}");
+        // NOTE: Review debug log
+        Log.Debug($"Determined total number of pages: {totalPages}");
 
-        // На всякий случай проверяем, что переданный список категорий покрывает страницы документа
+        // Ensure the provided configuration parameter list covers or safely cycles structural document page iterations
         int iterationsCount = totalPages;
 
         for (int i = 1; i <= iterationsCount; i++)
         {
-            Log.Debug($"--- Обработка страницы {i} из {totalPages} ---");
+            // NOTE: Review debug log
+            Log.Debug($"--- Processing page {i} of {totalPages} ---");
 
-            // Берем элемент по индексу, а если он один — он будет дублироваться для всех страниц
+            // Extract string item by indexing, falling back onto duplicating the final list choice item across trailing sections
             string currentCategory = (i - 1 < categoryNames.Count)
                 ? categoryNames[i - 1]
                 : categoryNames[categoryNames.Count - 1];
 
-            // 3. Поиск и клик по селекту
+            // 3. Search and trigger click events at the material select field container level
             var dropdown = dialog.Locator(".mat-mdc-select-value").First;
             await dropdown.ScrollIntoViewIfNeededAsync();
             await dropdown.WaitForAsync(new() { State = WaitForSelectorState.Visible });
 
-            Log.Debug("Ждем 1.5 секунды для гарантированной привязки Angular Event Listeners...");
+            // NOTE: Review debug log
+            Log.Debug("Waiting 1.5 seconds to guarantee stable binding of Angular Event Listeners...");
             await Page.WaitForTimeoutAsync(1500);
 
-            Log.Debug("Фокусируемся на селекте и кликаем...");
+            // NOTE: Review debug log
+            Log.Debug("Focusing on select field and clicking...");
             await dropdown.FocusAsync();
             await dropdown.ClickAsync(new() { Force = true });
 
-            // 4. Выбор опции
-            // Резервная копия на случай, если клик проигнорирован — жмем Space для открытия
-            Log.Debug("Проверяем, открылся ли список, если нет — шлем Space...");
+            // 4. Target list option selection action
+            // Implement a fallback button key trigger in case standard element clicking is ignored — dispatch Space key to trigger overlay expansions
+            // NOTE: Review debug log
+            Log.Debug("Verifying if option overlay wrapper expanded, if not — dispatching Space key sequence...");
             var overlay = Page.Locator(".cdk-overlay-container");
             if (!await overlay.Locator("mat-option").First.IsVisibleAsync())
             {
@@ -137,24 +185,28 @@ public class AttachmentsTab : BaseIncidentTabs
             var option = overlay.Locator("mat-option").GetByText(currentCategory, new() { Exact = false });
             await option.ClickAsync();
 
-            Log.Debug($"Категория '{currentCategory}' успешно выбрана для страницы {i}");
+            // NOTE: Review debug log
+            Log.Debug($"Category '{currentCategory}' successfully assigned for page {i}");
 
-            // 5. Обработка категории Other для текущей страницы
+            // 5. Context branch evaluation if category status properties match the 'Other' selector keyword
             if (currentCategory.Equals("Other", StringComparison.OrdinalIgnoreCase))
             {
-                Log.Debug("Выбрана категория 'Other', заполняем Notes...");
+                // NOTE: Review debug log
+                Log.Debug("Category 'Other' selected, populating notes field...");
                 var notesField = dialog.Locator("input[name='notes'], input[formcontrolname='notes']").First;
                 string notesToFill = string.IsNullOrEmpty(notes) ? "Auto-generated test notes" : notes;
                 await notesField.FillAsync(notesToFill);
-                Log.Debug($"Поле Notes заполнено текстом: '{notesToFill}'");
+                // NOTE: Review debug log
+                Log.Debug($"Notes field filled with text: '{notesToFill}'");
             }
 
-            // 6. Переход к следующей странице
+            // 6. Pagination layout stepping advancement forward logic
             if (i < totalPages)
             {
-                Log.Debug("Нажимаем стрелку 'вправо' для перехода к следующей странице.");
+                // NOTE: Review debug log
+                Log.Debug("Clicking the 'right' navigation arrow control to move onto the next document page frame layout.");
 
-                // Ищем div с классом pagination-button, внутри которого есть иконка chevron_right
+                // Locate the div container with class pagination-button encapsulating an internal chevron_right icon node
                 var nextButton = dialog.Locator("div.pagination-button")
                     .Filter(new() { HasText = "keyboard_arrow_right" })
                     .First;
@@ -162,52 +214,62 @@ public class AttachmentsTab : BaseIncidentTabs
                 await nextButton.ScrollIntoViewIfNeededAsync();
                 await nextButton.ClickAsync();
 
-                // Ждем, пока номер страницы на UI обновится (например, станет i + 1)
+                // Synchronize loop iteration logic states until the active pagination text updates to target indicators (e.g., matching i + 1 value layouts)
                 var expectedPageText = $"{i + 1} of {totalPages}";
                 await Assertions.Expect(paginationElement).ToContainTextAsync(expectedPageText);
-                Log.Debug($"Успешно перешли на страницу {i + 1}.");
+                // NOTE: Review debug log
+                Log.Debug($"Successfully transitioned to page {i + 1}.");
             }
         }
 
-        // 7. Завершение и сохранение
+        // 7. Workflow termination process and commit action persistence
         var assignButton = dialog.GetByRole(AriaRole.Button, new() { Name = "Assign Pages" });
-        Log.Debug("Проверяем доступность финальной кнопки 'Assign Pages'...");
+        // NOTE: Review debug log
+        Log.Debug("Evaluating usability of final 'Assign Pages' layout buttons...");
 
         await assignButton.ClickAsync();
-        Log.Debug("Кнопка 'Assign Pages' нажата.");
+        // NOTE: Review debug log
+        Log.Debug("'Assign Pages' action button clicked.");
 
         await dialog.WaitForAsync(new() { State = WaitForSelectorState.Hidden });
-        Log.Debug("Попап закрыт, метод работы со списком завершен успешно.");
+        // NOTE: Review debug log
+        Log.Debug("Popup layer dismissed, page mapping operation array completed successfully.");
     }
-
+    /// <summary>
+    /// Verifies that a uploaded attachment file is correctly generated and displayed within the grid data table by formatting search masks based on resident MRN and target category values.
+    /// </summary>
+    /// <param name="category">The specific document classification category string to evaluate.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
     public async Task VerifyAttachmentIsDisplayedAsync(string category)
     {
-        // 1. Получаем MRN резидента из шапки формы
+        // 1. Extract the resident's MRN directly from the form header elements
         var mrnElement = Page.Locator("div").Filter(new() { HasText = "MRN" }).Locator("xpath=..").Locator("span, div").Nth(1);
         string mrnText = await Page.GetByText("MRN").Locator("..").InnerTextAsync();
         var mrn = System.Text.RegularExpressions.Regex.Match(mrnText, @"\d+").Value;
 
-        Log.Debug($"Считанный MRN резидента: {mrn}");
+        // NOTE: Review debug log
+        Log.Debug($"Extracted Resident MRN code: {mrn}");
 
-        // 2. Форматируем имя категории для поиска (убираем пробелы и спецсимволы)
+        // 2. Format the target category label text for identification routing checks (scrubbing spaces and dashes)
         string formattedCategory = category.Replace(" ", "_").Replace("–", "-");
 
-        // Берем только базовую часть: "124216_Accident" или "124216_Charge", 
-        // так как длинные строки могут обрезаться интерфейсом (как видно по "Accident ..." на скриншоте)
+        // Extract only the base initial substring segment (e.g., "124216_Accident" or "124216_Charge"), 
+        // because long string parameters can be truncated by the user interface layout controls
         string searchMask = $"{mrn}_{formattedCategory.Split('_')[0]}";
 
-        Log.Debug($"Ищем файл по маске: '{searchMask}'");
+        // NOTE: Review debug log
+        Log.Debug($"Searching table rows for file matching mask criteria: '{searchMask}'");
 
-        // 3. Ждем, пока UI полностью обновится после закрытия попапа. 
-        // Даем Angular 1.5 секунды на перерисовку грида, так как файлы склеиваются на бэкенде
+        // 3. Wait until the user interface completely updates after closing the overlay dialog window component layers. 
+        // Allocate a 1.5-second pause for the Angular framework to redraw grid arrays since file composition operations aggregate asynchronously on back-end systems
         await Page.WaitForTimeoutAsync(1500);
 
-        // 4. Локализируем строку таблицы, которая содержит нашу маску
+        // 4. Isolate the explicit grid data table row structure containing the generated mask criteria string
         var targetRow = Page.Locator("tbody tr").Filter(new() { HasText = searchMask }).First;
 
-        // 5. Проверяем видимость строки с увеличенным таймаутом (10 секунд на случай долгой склейки PDF)
+        // 5. Assert visibility status on the isolated table row container using a high-threshold timeout margin (10 seconds to accommodate complex PDF generation processing)
         await Assertions.Expect(targetRow).ToBeVisibleAsync(new() { Timeout = 10000 });
 
-        Log.Information($"Файл для категории '{category}' (маска: '{searchMask}') успешно отображается в таблице.");
+        Log.Information($"The file for category classification '{category}' (search mask: '{searchMask}') is successfully visible within the data table view grid.");
     }
 }

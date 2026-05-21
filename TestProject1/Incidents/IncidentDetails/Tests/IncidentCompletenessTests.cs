@@ -1,17 +1,19 @@
-﻿using CareAdminTestProject.Incidents.IncidentDetails.Steps;
-using Microsoft.Extensions.Logging;
-using Microsoft.VisualBasic;
-using System;
-using System.Collections.Generic;
-using System.Text;
-using static IncidentDataFactory;
-
+﻿
 namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
 {
+    /// <summary>
+    /// Encapsulates functional completeness and form validation tests for different layout sheets.
+    /// Verifies that dynamic requirement indicator badges ("Red Dots") correctly appear and vanish 
+    /// based on input data transitions across multi-tab wizard blocks.
+    /// </summary>
     [TestFixture]
     internal class IncidentCompletenessTests : BaseIncidentTests
     {
-
+        /// <summary>
+        /// Validates bulk requirement indicators transitions for the General tab 
+        /// before submission, after data injection, and following draft persistence.
+        /// </summary>
+        /// <returns>A task representing the asynchronous operation.</returns>
         [Test]
         public async Task GeneralTabCompletenessVerification()
         {
@@ -19,28 +21,32 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
 
             await steps.ClearGeneralForm();
 
-            //Проверяем, что все нужные поля с красными точками
+            // Verify that all mandatory marked input fields display their required completeness indicator badges
             await steps.VerifyAllFieldsDotsStateAsync(steps.CreatePage.General, data.General, true);
-            //Проверяем, что Таба с красной точкой
+            // Verify that the parent Tab header element maps with its required incomplete indicator badge
             await steps.VerifyRedDotTab(tab, true);
-            //Заполняем
+            // Populate data fields
             await steps.FillGeneralTabAsync(data);
 
-            //До сохранения
-            //Проверяем, что все нужные поля без красных точкек
+            // Pre-submission check state evaluations
+            // Verify that all mandatory marked fields successfully hide their requirement indicator badges
             await steps.VerifyAllFieldsDotsStateAsync(steps.CreatePage.General, data.General, false);
-            //Проверяем, что Таба без красной точки
+            // Verify that the parent Tab header element masks its incomplete indicator badge away
             await steps.VerifyRedDotTab(tab, false);
             await steps.ClickCreateIncidentAsync();
 
-            //После сохранения
-            //Проверяем, что Таба без красной точки
+            // Post-submission check state evaluations
+            // Verify that the parent Tab header element remains clean without incomplete indicator badges
             await steps.VerifyRedDotTab(tab, false);
-            //Проверяем, что все нужные поля без красных точкек
+            // Verify that all mandatory marked input fields remain clean without required completeness indicator badges
             await steps.VerifyAllFieldsDotsStateAsync(steps.CreatePage.General, data.General, false);
-
         }
 
+        /// <summary>
+        /// Executes a progressive field-by-field verification on the General tab, 
+        /// confirming that filling each explicit input resolves its local required validation status immediately.
+        /// </summary>
+        /// <returns>A task representing the asynchronous operation.</returns>
         [Test]
         public async Task GeneralFieldsCompletenessVerification()
         {
@@ -52,9 +58,13 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
 
             await steps.VerifyFieldsOneByOneWithFilling(steps.CreatePage.General, data.General);
             await steps.VerifyRedDotTab(tab, false);
-
         }
 
+        /// <summary>
+        /// Validates bulk requirement indicators transitions for the Details tab, 
+        /// isolating dynamic behavior of sub-fields triggered conditionally by First Aid toggles.
+        /// </summary>
+        /// <returns>A task representing the asynchronous operation.</returns>
         [Test]
         public async Task DetailsTabCompletenessVerification()
         {
@@ -76,9 +86,13 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
 
             await steps.VerifyRedDotTab(tab, false);
             await steps.VerifyAllFieldsDotsStateAsync(steps.CreatePage.Details, data.Details, false);
-
         }
 
+        /// <summary>
+        /// Executes a progressive field-by-field verification loop on the Details tab via data dictionary maps, 
+        /// confirming that individual form updates dynamically resolve specific input completeness requirements.
+        /// </summary>
+        /// <returns>A task representing the asynchronous operation.</returns>
         [Test]
         public async Task DetailsFieldsCompletenessVerification()
         {
@@ -90,15 +104,17 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
 
             await steps.VerifyRedDotTab(tab, true);
 
-            // Вся магия цикла теперь тут:
+            // All dynamic step loop processing matrix execution happens inside this shared framework method:
             await steps.VerifyFieldsOneByOneWithFilling(steps.CreatePage.Details, data.Details);
 
             await steps.VerifyRedDotTab(tab, false);
-
         }
 
-
-
+        /// <summary>
+        /// Validates bulk requirement indicators transitions for the State tab, 
+        /// evaluating tab header badge status responses before and after data persistence.
+        /// </summary>
+        /// <returns>A task representing the asynchronous operation.</returns>
         [Test]
         public async Task StateTabCompletenessVerification()
         {
@@ -107,22 +123,27 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
             await steps.FillGeneralTabAsync(data);
             await steps.SwitchToTab(tab);
 
-            //Проверяем, что все таба с красной точкой
+            // Verify that the parent Tab header element maps with its required incomplete indicator badge
             await steps.VerifyRedDotTab(tab, true);
 
-            //Заполняем
+            // Populate data fields
             await steps.FillStateTabAsync(data);
 
-            //До сохранения
-            //Проверяем, что Таба без красной точки
+            // Pre-submission check state evaluations
+            // Verify that the parent Tab header element masks its incomplete indicator badge away
             await steps.VerifyRedDotTab(tab, false);
             await steps.ClickCreateIncidentAsync();
 
-            //После сохранения
-            //Проверяем, что Таба без красной точки
+            // Post-submission check state evaluations
+            // Verify that the parent Tab header element remains clean without incomplete indicator badges
             await steps.VerifyRedDotTab(tab, false);
         }
 
+        /// <summary>
+        /// Executes state-machine logic validations over the State tab checkbox elements collection, 
+        /// verifying rapid indicator appearances and vanishings directly inside state toggling loops.
+        /// </summary>
+        /// <returns>A task representing the asynchronous operation.</returns>
         [Test]
         public async Task StateFieldsCompletenessVerification()
         {
@@ -134,6 +155,12 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
             await steps.VerifyStateTabSpecificLogicAsync();
         }
 
+
+        /// <summary>
+        /// Validates bulk requirement indicator transitions for the Medication tab 
+        /// before data entry, after row clearing, and following form saving.
+        /// </summary>
+        /// <returns>A task representing the asynchronous operation.</returns>
         [Test]
         public async Task MedicationTabCompletenessVerification()
         {
@@ -142,14 +169,14 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
             await steps.FillGeneralTabAsync(data);
             await steps.SwitchToTab(tab);
 
-            //Проверяем, что все таба с красной точкой
+            // Verify that the parent Tab header element maps with its required incomplete indicator badge
             await steps.VerifyRedDotTab(tab, true);
 
-            //Заполняем
+            // Populate data fields
             await steps.FillMedicationTabAsync(data);
 
-            //До сохранения
-            //Проверяем, что Таба без красной точки
+            // Pre-submission check state evaluations
+            // Verify that the parent Tab header element masks its incomplete indicator badge away
             await steps.VerifyRedDotTab(tab, false);
             await steps.ClickCreateIncidentAsync();
 
@@ -161,11 +188,15 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
 
             await steps.ClickSaveIncidentAsync();
 
-            //После сохранения
-            //Проверяем, что Таба без красной точки
+            // Post-submission check state evaluations
+            // Verify that the parent Tab header element remains clean without incomplete indicator badges
             await steps.VerifyRedDotTab(tab, false);
         }
 
+        /// <summary>
+        /// Executes the full lifecycle and state-machine verification loops for the Medication grid table inputs.
+        /// </summary>
+        /// <returns>A task representing the asynchronous operation.</returns>
         [Test]
         public async Task MedicationFieldsCompletenessVerification()
         {
@@ -174,6 +205,11 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
             await steps.VerifyMedicationTabFullLifecycleAndIndicatorAsync();
         }
 
+        /// <summary>
+        /// Validates bulk requirement indicator transitions for the RN Supervisor Investigation Form tab 
+        /// before submission, after data entry, and following draft saving.
+        /// </summary>
+        /// <returns>A task representing the asynchronous operation.</returns>
         [Test]
         public async Task RNInvestigationFormTabCompletenessVerification()
         {
@@ -181,24 +217,29 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
             var tab = "RN Supervisor Investigation Form";
             await steps.SwitchToTab(tab);
 
-            //Проверяем, что все таба с красной точкой
+            // Verify that the parent Tab header element maps with its required incomplete indicator badge
             await steps.VerifyRedDotTab(tab, true);
 
-            //Заполняем
+            // Populate data fields
             await steps.FillRNFormTabAsync(data);
 
-            //До сохранения
-            //Проверяем, что Таба без красной точки
+            // Pre-submission check state evaluations
+            // Verify that the parent Tab header element masks its incomplete indicator badge away
             await steps.VerifyRedDotTab(tab, false);
             await steps.ClickCreateIncidentAsync();
 
-//            await steps.ClickSaveIncidentAsync();
+            //            await steps.ClickSaveIncidentAsync();
 
-            //После сохранения
-            //Проверяем, что Таба без красной точки
+            // Post-submission check state evaluations
+            // Verify that the parent Tab header element remains clean without incomplete indicator badges
             await steps.VerifyRedDotTab(tab, false);
         }
 
+        /// <summary>
+        /// Validates specific question transitions on the RN Investigation Form tab, 
+        /// utilizing inline callback hooks to monitor indicator statuses during processing loops.
+        /// </summary>
+        /// <returns>A task representing the asynchronous operation.</returns>
         [Test]
         public async Task RnInvestigationFormFieldsCompletenessVerification()
         {
@@ -207,9 +248,13 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
             await steps.SwitchToTab("RN Supervisor Investigation Form");
 
             await steps.FillRNFormTabWithTabCheckAsync(data);
-
         }
 
+        /// <summary>
+        /// Validates completeness transitions for the Summary tab, checking that the tab header 
+        /// remains marked incomplete until required digital signatures are successfully applied.
+        /// </summary>
+        /// <returns>A task representing the asynchronous operation.</returns>
         [Test]
         public async Task SummaryTabCompletenessVerification()
         {
@@ -218,29 +263,34 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
             var tab = "Summary";
             await steps.SwitchToTab(tab);
 
-            //Проверяем, что все таба с красной точкой
+            // Verify that the parent Tab header element maps with its required incomplete indicator badge
             await steps.VerifyRedDotTab(tab, true);
 
-            //Заполняем
+            // Populate data fields
             await steps.FillSummaryTabAsync(data);
 
-            //До сохранения
-            //Проверяем, что Таба c красной точкой, так как не подписана
+            // Pre-submission check state evaluations
+            // Verify that the tab remains marked incomplete because signatures are still missing
             await steps.VerifyRedDotTab(tab, true);
             await steps.ClickSaveIncidentAsync();
-            
-            //После первого сохранения
+
+            // After initial baseline persistence checks
             await steps.VerifyRedDotTab(tab, true);
 
-            //Подписываем
+            // Commit digital signatures sign-off workflows
             await steps.SignSummaryAndVerifyAsync();
             await steps.ClickSaveIncidentAsync(true);
 
-            //После сохранения
-            //Проверяем, что Таба без красной точки
+            // Post-submission check state evaluations
+            // Verify that the parent Tab header element successfully masks its incomplete indicator badge away
             await steps.VerifyRedDotTab(tab, false);
         }
 
+        /// <summary>
+        /// Executes a progressive field-by-field verification loop on the Summary tab via data dictionary maps, 
+        /// confirming that individual form updates dynamically resolve specific input completeness requirements.
+        /// </summary>
+        /// <returns>A task representing the asynchronous operation.</returns>
         [Test]
         public async Task SummaryFieldsCompletenessVerification()
         {
@@ -248,9 +298,13 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
             await steps.SwitchToTab("Summary");
 
             await steps.VerifyFieldsOneByOneWithFilling(steps.CreatePage.Summary, data.Summary);
-
         }
 
+        /// <summary>
+        /// Executes an incremental file upload evaluation loop on the Attachments tab, verifying that 
+        /// the tab completeness indicator badge reacts dynamically once data threshold boundaries are crossed.
+        /// </summary>
+        /// <returns>A task representing the asynchronous operation.</returns>
         [Test]
         public async Task AttachmentsTabCompletenessVerification()
         {
@@ -259,38 +313,43 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
             var tab = "Attachments";
             await steps.SwitchToTab(tab);
 
-            // Проверяем, что таба с красной точкой перед началом загрузок
+            // Verify that the parent Tab header element maps with its required incomplete indicator badge before upload sequences initialize
             await steps.VerifyRedDotTab(tab, true);
 
             int max = 10;
-            int check = 1; // Граница, после которой точка должна пропасть
+            int check = 1; // Operational boundary line determining when the indicator badge should vanish
 
             for (int i = 0; i < max; i++)
             {
-                // Достаем категорию по индексу цикла из статического списка класса AttachmentsTab
+                // Extract category strings dynamically by tracking loop iteration indexes against static collection records
                 string currentCategory = AttachmentsTab.AttachmentCategories[i];
                 string? note = currentCategory.Equals("Other", StringComparison.OrdinalIgnoreCase)
                     ? "Test internal note for Other category"
                     : null;
 
-                // Передаем динамически полученное имя категории в метод загрузки
+                // Pass the dynamically resolved category name forward into the file streaming upload processor pipeline
                 await steps.UploadAttachmentTabAsync(currentCategory, note, fileNameString: "test_1page.pdf", toScreenShot: true);
                 await Page.WaitForTimeoutAsync(1000);
 
-                // Проверяем состояние красной точки
-                // Если загружено меньше 'check' файлов (индексы 0, 1, 2, 3, 4 — первые 5 файлов), точка все еще на месте
+                // Evaluate the current state of the tab header completeness indicator badge
+                // If uploaded item counts scale lower than 'check' thresholds (first lines execution bounds), the indicator badge stays visible
                 if (i < check - 1)
                 {
                     await steps.VerifyRedDotTab(tab, true);
                 }
                 else
                 {
-                    // Как только загружен 5-й файл (индекс 4 завершился, либо проверяем на итерациях с i >= 4)
+                    // As soon as the designated initial file uploading transactions terminate successfully
                     await steps.VerifyRedDotTab(tab, false);
                 }
             }
         }
 
+        /// <summary>
+        /// Verifies that uploading a single multi-page file and mapping required category layouts 
+        /// successfully satisfies and clears the Attachments tab completeness requirement in one action.
+        /// </summary>
+        /// <returns>A task representing the asynchronous operation.</returns>
         [Test]
         public async Task AttachmentsTabSingleMultyPageFileCompletenessVerification()
         {
@@ -299,15 +358,14 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
             var tab = "Attachments";
             await steps.SwitchToTab(tab);
 
-            //Проверяем, что все таба с красной точкой
+            // Verify that the parent Tab header element maps with its required incomplete indicator badge
             await steps.VerifyRedDotTab(tab, true);
 
-            //Заполняем
+            // Populate multi-page attachment data parameters
             await steps.UploadAttachmentTabAsync(AttachmentsTab.AttachmentCategories, fileNameString: "test_10pages.pdf", toScreenShot: true);
             await steps.VerifyRedDotTab(tab, false);
-
         }
-
     }
 }
+
 
