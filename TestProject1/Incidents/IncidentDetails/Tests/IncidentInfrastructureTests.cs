@@ -1,7 +1,4 @@
-﻿using Microsoft.Extensions.Logging;
-
-
-namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
+﻿namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
 {
     [TestFixture]
     public class IncidentInfrastructureTests : BaseIncidentTests
@@ -15,13 +12,13 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
         public async Task ShouldOpenIncidentDashboardFromHomePage()
         {
             // Session authorization is already active. Proceeding straight to execution steps.
-            Log.LogDebug("Navigating directly to the application HOME page routing path...");
+            Log.Debug("Navigating directly to the application HOME page routing path...");
             await Page.GotoAsync("/");
 
-            Log.LogDebug("Triggering redirection link path toward the main Accident/Incident area...");
+            Log.Debug("Triggering redirection link path toward the main Accident/Incident area...");
             await Page.GetByAltText("Accident/Incident").ClickAsync();
 
-            Log.LogDebug("Evaluating if the primary main dashboard grid finishes rendering post routing redirect...");
+            Log.Debug("Evaluating if the primary main dashboard grid finishes rendering post routing redirect...");
             await Expect(Page).ToHaveURLAsync(new System.Text.RegularExpressions.Regex(".*dashboards/incident-main"));
             await Expect(Page.Locator("cad-breadcrumb").GetByText("Main Dashboard")).ToBeVisibleAsync();
         }
@@ -44,7 +41,7 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
             // 3. VERIFICATION: Assert that selection label inner text updates match target facility assignments
             await Expect(Page.Locator(".k-input-value-text").First)
                 .ToContainTextAsync(facility);
-            Log.LogDebug("Switching to Carillon location completed successfully.");
+            Log.Debug("Switching to Carillon location completed successfully.");
 
             await GetCurrentSelectionAsync();
         }
@@ -62,7 +59,7 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
             // VERIFICATION: Assert that selection label inner text updates match Cassena Care assignments
             await Expect(Page.Locator(".k-input-value-text").First)
                 .ToContainTextAsync("Cassena Care");
-            Log.LogInformation("Switching to Cassena Care location completed successfully.");
+            Log.Information("Switching to Cassena Care location completed successfully.");
 
             await GetCurrentSelectionAsync();
         }

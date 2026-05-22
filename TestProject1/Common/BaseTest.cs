@@ -1,10 +1,8 @@
 ﻿using Microsoft.Extensions.Logging;
 using Microsoft.Playwright;
+using Microsoft.Playwright.NUnit;
+using NUnit.Framework;
 using Serilog;
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Threading.Tasks;
 
 namespace CareAdminTestProject.Common
 {
@@ -29,13 +27,14 @@ namespace CareAdminTestProject.Common
         /// <summary>
         /// Dedicated logger instance for tracking framework initialization steps and test lifecycle events.
         /// </summary>
-        protected Microsoft.Extensions.Logging.ILogger<BaseTest> Log;
+        protected Serilog.ILogger Log;
 
         private static readonly SemaphoreSlim _authSemaphore = new SemaphoreSlim(1, 1);
         private static IPlaywright _playwright;
         private static IBrowser _sharedBrowser;
 
         private readonly List<string> _networkErrors = new List<string>();
+        private const int MaxAuthRetries = 3;
 
         /// <summary>
         /// Initializes the shared heavy browser instance once before any tests in the fixture start execution.
@@ -46,6 +45,12 @@ namespace CareAdminTestProject.Common
         {
             _playwright = await Microsoft.Playwright.Playwright.CreateAsync();
             _sharedBrowser = await _playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = true });
+
+            // Initialize global Serilog configuration once per run
+            Serilog.Log.Logger = new LoggerConfiguration()
+                .MinimumLevel.Debug()
+                .WriteTo.File($"logs/test-run-.txt", rollingInterval: RollingInterval.Day, shared: true)
+                .CreateLogger();
         }
 
         /// <summary>
@@ -69,24 +74,17 @@ namespace CareAdminTestProject.Common
         [SetUp]
         public async Task BaseSetup()
         {
-            Serilog.Log.Logger = new LoggerConfiguration()
-                .MinimumLevel.Debug()
-                .WriteTo.File($"logs/test-run-.txt", rollingInterval: RollingInterval.Day)
-                .CreateLogger();
+            Log = Serilog.Log.ForContext("WorkerId", TestContext.CurrentContext.WorkerId);
 
-            var loggerFactory = LoggerFactory.Create(builder => builder.AddSerilog());
-            Log = loggerFactory.CreateLogger<BaseTest>();
-
-            Log.LogInformation($"Initializing test context for Worker: {TestContext.CurrentContext.WorkerId}...");
+            Log.Information($"Initializing test context for Worker: {TestContext.CurrentContext.WorkerId}...");
 
             await _authSemaphore.WaitAsync();
             try
             {
                 if (!File.Exists(StatePath))
                 {
-                    Log.LogInformation($"[AUTH] state.json missing for Worker {TestContext.CurrentContext.WorkerId}. Triggering baseline authentication sequence...");
-                    await AuthSetup.CreateLogin(_sharedBrowser, Context, Page, _networkErrors, BaseUrl, StatePath);
-                    File.SetLastWriteTime(StatePath, DateTime.Now);
+                    Log.Information($"[AUTH] state.json missing for Worker {TestContext.CurrentContext.WorkerId}. Triggering baseline authentication sequence...");
+                    await ExecuteAuthWithRetriesAsync("INITIAL AUTH");
                 }
 
                 await RefreshTokenIfNeededInternal();
@@ -96,11 +94,22 @@ namespace CareAdminTestProject.Common
                 _authSemaphore.Release();
             }
 
+            Log.Information($"[NAVIGATE] Worker {TestContext.CurrentContext.WorkerId} navigating to home page...");
             // Direct page viewport towards the target system landing pathway
             await Page.GotoAsync("/", new() { Timeout = 60000, WaitUntil = WaitUntilState.Commit });
 
-            var rootAppAnchor = Page.Locator("input[placeholder='Username'], span.title:has-text('My Tasks')").First;
-            await rootAppAnchor.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 30000 });
+            Log.Information($"[NAVIGATE] Worker {TestContext.CurrentContext.WorkerId} waiting for application anchor elements...");
+            try
+            {
+                var rootAppAnchor = Page.Locator("input[placeholder='Username'], span.title:has-text('My Tasks')").First;
+                await rootAppAnchor.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 30000 });
+                Log.Information($"[NAVIGATE] Worker {TestContext.CurrentContext.WorkerId} successfully reached target landing state.");
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"[NAVIGATE FAILED] Worker {TestContext.CurrentContext.WorkerId} stuck on empty screen. Current URL: {Page.Url}. Error: {ex.Message}");
+                throw;
+            }
         }
 
         /// <summary>
@@ -115,24 +124,55 @@ namespace CareAdminTestProject.Common
 
             if (needRefresh)
             {
-                Log.LogInformation($"[REFRESH] Token expired for Worker {TestContext.CurrentContext.WorkerId}. Initiating session refresh sequence...");
+                Log.Information($"[REFRESH] Token expired or missing for Worker {TestContext.CurrentContext.WorkerId}. Initiating session refresh sequence...");
                 _networkErrors.Clear();
 
+                Log.Information($"[REFRESH] Navigating to root before refresh sequence on Worker {TestContext.CurrentContext.WorkerId}...");
                 await Page.GotoAsync("/", new() { WaitUntil = WaitUntilState.Commit });
 
+                await ExecuteAuthWithRetriesAsync("SESSION REFRESH");
+            }
+        }
+
+        /// <summary>
+        /// Executes the login sequence wrapper with automatic retry logic and extensive error logging.
+        /// </summary>
+        private async Task ExecuteAuthWithRetriesAsync(string contextName)
+        {
+            for (int attempt = 1; attempt <= MaxAuthRetries; attempt++)
+            {
                 try
                 {
+                    Log.Information($"[{contextName}] Attempt {attempt} of {MaxAuthRetries} for Worker {TestContext.CurrentContext.WorkerId}...");
+
                     await AuthSetup.CreateLogin(_sharedBrowser, Context, Page, _networkErrors, BaseUrl, StatePath);
                     File.SetLastWriteTime(StatePath, DateTime.Now);
-                    Log.LogInformation($"[REFRESH] Session updated successfully for Worker {TestContext.CurrentContext.WorkerId}.");
+
+                    Log.Information($"[{contextName}] Successfully completed on attempt {attempt} for Worker {TestContext.CurrentContext.WorkerId}.");
+                    return;
                 }
                 catch (Exception ex)
                 {
-                    Log.LogError($"[REFRESH FAILED] Authentication sequence crashed on Worker {TestContext.CurrentContext.WorkerId}: {ex.Message}");
-                    throw;
+                    Log.Warning($"[{contextName} FAILED] Attempt {attempt} failed on Worker {TestContext.CurrentContext.WorkerId}. Current URL: {Page.Url}. Error: {ex.Message}");
+
+                    if (_networkErrors.Any())
+                    {
+                        Log.Warning($"[{contextName} NET ERRORS] Intercepted network errors during attempt {attempt}: {string.Join(" | ", _networkErrors)}");
+                        _networkErrors.Clear();
+                    }
+
+                    if (attempt == MaxAuthRetries)
+                    {
+                        Log.Error($"[{contextName} CRITICAL] All {MaxAuthRetries} authentication attempts failed for Worker {TestContext.CurrentContext.WorkerId}.");
+                        throw;
+                    }
+
+                    // Small progressive delay between retries to let network/services stabilize
+                    await Task.Delay(TimeSpan.FromSeconds(attempt * 2));
                 }
             }
         }
+
         /// <summary>
         /// Performs cleanup after each test. If the test fails, captures a page screenshot and attaches it to the report.
         /// </summary>
@@ -152,7 +192,7 @@ namespace CareAdminTestProject.Common
                 var path = Path.Combine(TestContext.CurrentContext.WorkDirectory, $"{safeName}_failed.png");
                 await Page.ScreenshotAsync(new() { Path = path });
                 TestContext.AddTestAttachment(path, "Screenshot on Failure");
-                Log.LogError($"Failure Screenshot is saved {path}");
+                Log.Error($"Failure Screenshot is saved {path}");
             }
         }
 

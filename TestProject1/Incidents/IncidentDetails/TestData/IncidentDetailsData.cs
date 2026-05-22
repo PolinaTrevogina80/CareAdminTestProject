@@ -95,7 +95,7 @@ public static class IncidentDataFactory
             bed: residentInfo.Bed,
             date: edtNow.Date, 
             time: uniqueTime,
-            unit: "2",
+            unit: residentInfo.Unit,
             location: "Lobby",
             type: "Fall",
             supervisor: 1,

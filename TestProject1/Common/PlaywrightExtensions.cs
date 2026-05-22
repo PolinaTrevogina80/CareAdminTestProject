@@ -1,4 +1,8 @@
 ﻿using Microsoft.Playwright;
+using Newtonsoft.Json.Linq;
+using Serilog;
+using System.Runtime.CompilerServices;
+using static System.Net.Mime.MediaTypeNames;
 
 /// <summary>
 /// Provides utility extension methods for Playwright fluent interactions.
@@ -25,6 +29,112 @@ namespace CareAdminTestProject.Common
 
             // Bind the image reference directly to NUnit metadata (TestContext maps safely via localized execution threads)
             TestContext.AddTestAttachment(path, stepName);
+        }
+
+        /// <summary>
+        /// Executes an authorized asynchronous HTTP POST request to retrieve available employee rosters.
+        /// Extracts a secure session bearer token and passes the operational facility context parameters.
+        /// Catch blocks safely encapsulate connection failures into structured fallback network error logs.
+        /// </summary>
+        /// <param name="page">The current Playwright page automation instance handling the execution context window.</param>
+        /// <param name="apiName">The specific descriptive alias matching the routing gateway layout.</param>
+        /// <returns>A string payload representing the response body or a safe formatted network exception text envelope.</returns>
+
+        public static async Task<string> ApiPostRequest(this IPage page, string apiName)
+        {
+
+            string token = "";
+            try
+            {
+                token = await GetTokenFromFile();
+
+                // Делаем POST-запрос, явно передавая заголовок Authorization
+                var apiResponse = await page.APIRequest.PostAsync("employees", new()
+                {
+                    DataObject = new { facilityId = "c1f80483-fd30-4327-814e-778ad171a67b" },
+                    Headers = new Dictionary<string, string>
+                    {
+                        { "Authorization", token.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? token : $"Bearer {token}" },
+                        { "Accept", "application/json" }
+                    }
+                });
+
+                if (!apiResponse.Ok)
+                {
+                    Assert.Fail($"API Error: Failed to fetch employees. Status: {apiResponse.Status}, Text: {await apiResponse.TextAsync()}");
+                }
+
+                return await apiResponse.TextAsync();
+            }
+            catch (Exception ex)
+            {
+                return($"Network Error: Exception occurred while requesting employee data: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Extracts a valid authentication Bearer access token straight from the worker-isolated storage state environment file.
+        /// Parses the underlying multi-origin localStorage schema layout tracking the explicit session key structures.
+        /// </summary>
+        /// <returns>A clean text value representation of the authorization access token data mapping string.</returns>
+        /// <exception cref="NUnit.Framework.AssertionException">Thrown if the state path context is missing or token serialization steps return null.</exception>
+
+        private static async Task<string> GetTokenFromFile()
+        {
+            Log.Debug("[STAFF_VALIDATION] Extracting Bearer token from storage state...");
+
+            string token = "";
+            string statePath = Path.Combine(
+    TestContext.CurrentContext.TestDirectory,
+    $"state_{TestContext.CurrentContext.WorkerId}.json");
+
+            Log.Debug($"[STAFF_VALIDATION] Reading state file from: {statePath}");
+
+            if (File.Exists(statePath))
+            {
+                var stateContent = File.ReadAllText(statePath);
+                using var stateDoc = System.Text.Json.JsonDocument.Parse(stateContent);
+
+                // 1. Берем массив "origins"
+                var originsArray = stateDoc.RootElement.GetProperty("origins").EnumerateArray();
+
+                // 2. Ищем нужный origin (наш BaseUrl) или берем первый попавшийся
+                var currentOrigin = originsArray.FirstOrDefault(o =>
+                    o.TryGetProperty("localStorage", out var ls) && ls.ValueKind == System.Text.Json.JsonValueKind.Array);
+
+                if (currentOrigin.ValueKind != System.Text.Json.JsonValueKind.Undefined)
+                {
+                    // 3. Теперь безопасно извлекаем массив localStorage из найденного объекта origin
+                    var localStorageItems = currentOrigin.GetProperty("localStorage").EnumerateArray();
+
+                    var sessionKeyItem = localStorageItems.FirstOrDefault(i =>
+                        i.GetProperty("name").GetString() == "wc.sessionStorageKey");
+
+                    if (sessionKeyItem.ValueKind != System.Text.Json.JsonValueKind.Undefined)
+                    {
+                        string innerJsonStr = sessionKeyItem.GetProperty("value").GetString() ?? "";
+                        using var innerDoc = System.Text.Json.JsonDocument.Parse(innerJsonStr);
+
+                        if (innerDoc.RootElement.TryGetProperty("accessToken", out var accessTokenObj) &&
+                            accessTokenObj.TryGetProperty("accessToken", out var tokenProp))
+                        {
+                            token = tokenProp.GetString() ?? "";
+                        }
+                    }
+                }
+            }
+            else
+            {
+                Assert.Fail($"Validation Error: Target state file was not found at path: {statePath}");
+            }
+
+            if (string.IsNullOrEmpty(token))
+            {
+                Assert.Fail("Validation Error: Bearer token could not be extracted from the internal wc.sessionStorageKey structure.");
+            }
+
+            Log.Debug("[STAFF_VALIDATION] Token extracted successfully. Executing authorized POST request...");
+            return token;
         }
     }
 

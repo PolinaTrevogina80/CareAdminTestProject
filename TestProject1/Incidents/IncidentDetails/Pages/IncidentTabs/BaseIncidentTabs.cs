@@ -8,7 +8,7 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Pages.IncidentTabs
     /// Serves as the abstract base class for all incident form tab pages.
     /// Provides shared locators, input handlers, and utility methods for UI interactions.
     /// </summary>
-    ///     /// <para><b>--- METHOD DIRECTORY & QUICK LINKS ---</b></para>
+    /// <para><b>--- METHOD DIRECTORY & QUICK LINKS ---</b></para>
     /// <list type="bullet">
     ///   <item> <description> Form Control Resolvers & Core Utilities </description> </item>
     ///   <list type="bullet">
@@ -38,7 +38,6 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Pages.IncidentTabs
     ///     <item> <description> Iframe-Isolated Kendo Rich Text Handler: <see cref="FillRichTextFieldAsync(string, string)"/> </description> </item>
     ///     <item> <description> Labeled Calendar Input Trigger Resolver: <see cref="GetFieldIcon(string)"/> </description> </item>
     ///     <item> <description> Named Datepicker Input Trigger Resolver: <see cref="GetFieldIconByName(string)"/> </description> </item>
-    ///     <item> <description> Control Icon Scroller & Action Tracker: <see cref="ClickControlIcon(string)"/> </description> </item>
     ///     <item> <description> Complex Grid TimePicker Time Dispatcher: <see cref="SelectTimeInPickerAsync(string, TimeOnly)"/> </description> </item>
     ///     <item> <description> Column Regular-Expression Value Matcher: <see cref="SelectKendoColumnValue(ILocator, int, string[])"/> </description> </item>
     ///   </list>
@@ -198,7 +197,7 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Pages.IncidentTabs
         /// </summary>
         /// <param name="nameAttribute">The specific string value assigned to the name attribute of the kendo-datepicker element.</param>
         /// <returns>An <see cref="ILocator"/> pointing to the input button control wrapper element.</returns>
-        protected ILocator GetFieldIconByName(string nameAttribute)
+        public ILocator GetFieldIconByName(string nameAttribute)
         {
             // Search for kendo-datepicker with the matching name and find the calendar button inside it
             return Page.Locator($"kendo-datepicker[name='{nameAttribute}'] button.k-input-button");
@@ -221,26 +220,6 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Pages.IncidentTabs
 
             // Select item row matching targeted index configuration rules
             await options.Nth(index).ClickAsync();
-        }
-
-        /// <summary>
-        /// Focuses and clicks on a date picker control icon identified by its technical html name attribute.
-        /// </summary>
-        /// <param name="nameAttribute">The targeted identifier or technical html element name attribute string.</param>
-        /// <returns>A task representing the asynchronous operation.</returns>
-        protected async Task ClickControlIcon(string nameAttribute)
-        {
-            // 1. Click the calendar action button icon element
-            var calendarIcon = GetFieldIconByName(nameAttribute);
-
-            // Force alignment scrolling towards target indicators prior to handling click events
-            await calendarIcon.ScrollIntoViewIfNeededAsync();
-            await calendarIcon.ClickAsync();
-
-            // Maintain synchronization delay ensuring overlay animations expand fully before execution steps proceed
-            await Task.Delay(1000);
-
-            // 2. Wait for the popup container layer to reveal
         }
 
         /// <summary>

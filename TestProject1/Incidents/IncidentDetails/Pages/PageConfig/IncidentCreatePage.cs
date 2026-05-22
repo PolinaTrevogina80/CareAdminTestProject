@@ -18,7 +18,7 @@ public class IncidentCreatePage : BaseIncidentTabs
     /// <summary>
     /// Encapsulates biographical and location metadata captured for a chosen resident.
     /// </summary>
-    public record ResidentInfo(string Name, string Room, string Bed);
+    public record ResidentInfo(string Name, string Room, string Bed, string Unit);
 
     /// <summary> Gets the operational controller instance for the General tab form fields. </summary>
     public GeneralTab General { get; }
@@ -158,11 +158,23 @@ public class IncidentCreatePage : BaseIncidentTabs
                 var mrnValueContainer = mrnField.Locator(".lv-value");
                 await Assertions.Expect(mrnValueContainer).ToContainTextAsync(new System.Text.RegularExpressions.Regex(@"\d+"), new() { Timeout = 10000 });
                 Log.Debug("[RESIDENT_DIAG] MRN successfully validated!");
+                string capturedBedValue = "";
+                try
+                {
+                    // Используем твой базовый метод поиска инпута по лейблу "Bed"
+                    capturedBedValue = await GetFieldByLabel("Bed").InputValueAsync();
+                    Log.Debug($"[RESIDENT_DIAG] Captured Bed value: '{capturedBedValue}'");
+                }
+                catch (Exception ex)
+                {
+                    Log.Warning($"[RESIDENT_DIAG WARN] Failed to read Bed input value: {ex.Message}");
+                }
 
                 return new ResidentInfo(
                     Name: expectedName,
                     Room: parts.ElementAtOrDefault(1) ?? "",
-                    Bed: parts.ElementAtOrDefault(2) ?? ""
+                    Bed: capturedBedValue,
+                    Unit: parts.ElementAtOrDefault(2) ?? ""
                 );
             }
             catch (Exception ex)

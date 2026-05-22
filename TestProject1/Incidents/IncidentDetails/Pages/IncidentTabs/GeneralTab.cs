@@ -5,6 +5,18 @@ using Log = CareAdminTestProject.Common.TestLog;
 /// <summary>
 /// Represents the "General" information tab page object within the incident creation or editing workflow.
 /// Encapsulates all UI interaction patterns, form filling operations, and field validation data maps.
+/// <para><b>--- METHOD DIRECTORY & QUICK LINKS ---</b></para>
+/// <list type="bullet">
+/// <item><description> Wipes non-essential fields for indicator checks: <see cref="IncidentGeneralInfo.GetOnlyRequiredFields()"/> </description></item>
+/// <item><description> Constructs a form boundary interactive map grid: <see cref="GetRequiredFieldsMap(IncidentGeneralInfo)"/></description></item>
+/// <item><description> Executes sequential UI insertions to fill basic form data: <see cref="FillBasicInfoAsync(IncidentGeneralInfo)"/></description></item>
+/// <item><description> Populates sequential dynamic injury records by row index: <see cref="AddInjuryAsync(int, InjuryInfo)"/></description></item>
+///     <item> <description> Control Icon Scroller & Action Tracker: <see cref="ClickControlIcon(string)"/> </description> </item>
+/// <item><description> Locates and selects the current date in Kendo UI calendars: <see cref="SelectTodayAsync(string)"/></description></item>
+/// <item><description> Traverses Angular Material date pickers to select specific dates: <see cref="SelectDateInCalendarAsync(string, DateTime)"/></description></item>
+/// <item><description> Flushes room and bed control inputs for form validation: <see cref="ClearPreFilledFieldsAsync()"/></description></item>
+/// <item><description> Runs UI assertions to match physical values against source data: <see cref="VerifyDataFieldsAsync(IncidentGeneralInfo)"/></description></item>
+/// </list>
 /// </summary>
 public class GeneralTab : BaseIncidentTabs
 {
@@ -107,7 +119,7 @@ public class GeneralTab : BaseIncidentTabs
         { "Date of Incident", (async () => { if (data.date.HasValue) await SelectTodayAsync("dateOfIncident"); }, true) },
         
         // Extracting pure .Value, checking by null before
-        { "Time of Incident", (async () => { if (data.time.HasValue) await SelectTimeInPickerAsync("timeOfIncident", data.time.Value); }, true) },
+        { "Time of Incident", (async () => { if (data.time.HasValue) await SelectTimeInPickerAsync("timeOfIncident", data.time.Value);}, true) },
         
         // Extracting numeric values via .Value, if they were transfered
         { "Supervisor", (async () => { if (data.supervisor.HasValue) await SelectDropdownOptionAsync("Supervisor", data.supervisor.Value); }, true) },
@@ -251,6 +263,26 @@ public class GeneralTab : BaseIncidentTabs
     }
 
     /// <summary>
+    /// Focuses and clicks on a date picker control icon identified by its technical html name attribute.
+    /// </summary>
+    /// <param name="nameAttribute">The targeted identifier or technical html element name attribute string.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    public async Task ClickControlIcon(string nameAttribute)
+    {
+        // 1. Click the calendar action button icon element
+        var calendarIcon = GetFieldIconByName(nameAttribute);
+
+        // Force alignment scrolling towards target indicators prior to handling click events
+        await calendarIcon.ScrollIntoViewIfNeededAsync();
+        await calendarIcon.ClickAsync();
+
+        // Maintain synchronization delay ensuring overlay animations expand fully before execution steps proceed
+        await Task.Delay(1000);
+
+        // 2. Wait for the popup container layer to reveal
+    }
+
+    /// <summary>
     /// Selects the current date ("Today") from a Kendo UI calendar popup.
     /// </summary>
     /// <param name="nameAttribute">The name attribute or identifier of the date control.</param>
@@ -360,8 +392,17 @@ public class GeneralTab : BaseIncidentTabs
 
         if (!string.IsNullOrEmpty(expected.bed))
         {
+            // Стандартный кейс: если в тест-данных передана конкретная кровать, сверяем с ней
             var actualBed = await GetFieldByLabel("Bed").InputValueAsync();
             Assert.That(actualBed, Is.EqualTo(expected.bed));
+        }
+        else
+        {
+            // Кейс автозаполнения: если в expected кровать пустая, проверяем, что фронтенд 
+            // САМ заполнил это поле на форме хоть каким-то значением (оно не осталось пустым)
+            var actualBed = await GetFieldByLabel("Bed").InputValueAsync();
+            Assert.That(actualBed, Is.Not.Null.And.Not.Empty,
+                "Validation Error: The 'Bed' field on the form is empty, but it should be auto-populated from the resident profile!");
         }
 
         if (!string.IsNullOrEmpty(expected.location))
@@ -428,5 +469,6 @@ public class GeneralTab : BaseIncidentTabs
                 "CNA draft text mismatch!");
         }
     }
+
 
 }

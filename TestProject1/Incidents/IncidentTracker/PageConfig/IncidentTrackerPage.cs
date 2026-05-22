@@ -1,4 +1,5 @@
 ﻿using Microsoft.Playwright;
+using Serilog;
 
 /// <summary>
 /// Represents the Incident Tracker dashboard page.
@@ -23,9 +24,26 @@ public class IncidentTrackerPage
     /// <returns>A task representing the asynchronous operation.</returns>
     public async Task ClickNewIncidentAsync()
     {
+        Log.Debug("[NAVIGATION] Checking for active loading overlays before clicking 'New Incident'...");
+
+        // 1. Сначала железно дожидаемся скрытия спиннера, если он крутится на экране
+        var loader = _page.Locator("kendo-loading, .k-loading-overlay, .k-i-loading, [class*='loading']").First;
+        try
+        {
+            await loader.WaitForAsync(new() { State = WaitForSelectorState.Hidden, Timeout = 5000 });
+            Log.Debug("[NAVIGATION] Loading spinner state is cleared.");
+        }
+        catch (TimeoutException)
+        {
+            Log.Debug("[NAVIGATION] Loading spinner was not present or disappeared instantly.");
+        }
+
+        // 2. Теперь спокойно дожидаемся кнопку и кликаем по ней
         var newIncidentButton = _page.GetByRole(AriaRole.Button, new() { Name = "New Incident" });
 
         await newIncidentButton.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 10000 });
         await newIncidentButton.ClickAsync();
+
+        Log.Debug("[NAVIGATION] 'New Incident' button clicked successfully.");
     }
 }

@@ -1,5 +1,4 @@
 ﻿using CareAdminTestProject.Incidents.IncidentDetails.Steps;
-using Microsoft.Extensions.Logging;
 using Microsoft.Playwright;
 using CareAdminTestProject.Common;
 using static IncidentDataFactory;
@@ -33,7 +32,7 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
         [SetUp]
         public async Task Setup()
         {
-            Log.LogDebug($"Executing Setup lifecycle sequence: switching to Carillon facility area...");
+            Log.Debug($"Executing Setup lifecycle sequence: switching to Carillon facility area...");
 
             await EnsureFacilitySelected("Carillon");
 
@@ -53,12 +52,12 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
             // Начинаем с индекса 1 (пропуская 0, если первый элемент в дропдауне — это какой-то пустой плейсхолдер)
             int residentIndex = (currentTestRunIndex % 45) + 1;
 
-            Log.LogDebug($"[PARALLEL ENGINE] Test '{TestContext.CurrentContext.Test.Name}' triggered. " +
+            Log.Debug($"[PARALLEL ENGINE] Test '{TestContext.CurrentContext.Test.Name}' triggered. " +
                          $"Global Run Number: {currentTestRunIndex}. Selecting unique Resident Index: {residentIndex}");
             // =========================================================================
 
 
-            Log.LogDebug($"[THREAD PARALLEL] Thread ID {threadId} evaluates to Resident Index: {residentIndex}");
+            Log.Debug($"[THREAD PARALLEL] Thread ID {threadId} evaluates to Resident Index: {residentIndex}");
 
             resident = await steps.SelectResidentAsync(residentIndex);
             data = IncidentDataFactory.CreateDefaultFall(resident);
@@ -82,7 +81,7 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
 
             await option.WaitForAsync(new() { State = WaitForSelectorState.Visible });
             await option.ClickAsync();
-            Log.LogInformation($"Switching to facility context '{facilityName}' completed successfully.");
+            Log.Information($"Switching to facility context '{facilityName}' completed successfully.");
 
             // Synchronize execution bounds until target text modifications update completely within the selector template
             await Expect(Page.Locator(".k-input-value-text").First).ToContainTextAsync(facilityName);
@@ -118,7 +117,7 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
             await Expect(Page.Locator(".k-input-value-text").First)
                 .ToContainTextAsync(targetName, new() { Timeout = 10000 });
 
-            Log.LogInformation($"{targetName} selected");
+            Log.Information($"{targetName} selected");
         }
 
         /// <summary>
@@ -132,7 +131,7 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
             if (await GetCurrentSelectionAsync() != target)
             {
                 // NOTE: Review debug log
-                Log.LogDebug($"[SETUP] Toggling selection properties toward parent group context: {target}");
+                Log.Debug($"[SETUP] Toggling selection properties toward parent group context: {target}");
                 await SelectInTreeAsync(target);
             }
         }
@@ -151,9 +150,9 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
             if (currentText?.Trim() != facilityName)
             {
                 // NOTE: Review debug log
-                Log.LogDebug($"Current facility context is evaluated as - Cassena Care");
+                Log.Debug($"Current facility context is evaluated as - Cassena Care");
                 // NOTE: Review debug log
-                Log.LogDebug($"[SETUP] Actively switching institutional facility work scope to '{facilityName}'");
+                Log.Debug($"[SETUP] Actively switching institutional facility work scope to '{facilityName}'");
                 await SelectInTreeAsync(facilityName);
                 await GetCurrentSelectionAsync();
 
@@ -170,7 +169,7 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
             // await Page.GotoAsync("/accident-incident/dashboards/incident-main");
             var text = await Page.Locator(".k-input-value-text").First.TextContentAsync();
             // NOTE: Review debug log
-            Log.LogDebug($"Active work scope selection context reads as: {text}");
+            Log.Debug($"Active work scope selection context reads as: {text}");
 
             return text?.Trim() ?? string.Empty;
         }

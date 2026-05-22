@@ -1,7 +1,9 @@
-﻿using CareAdminTestProject.Incidents.IncidentDetails.Pages.IncidentTabs;
+﻿using CareAdminTestProject.Common;
+using CareAdminTestProject.Incidents.IncidentDetails.Pages.IncidentTabs;
 using Microsoft.Playwright;
 using Serilog;
-using CareAdminTestProject.Common;
+using System.Buffers.Text;
+using static CareAdminTestProject.Common.BaseTest;
 using static CareAdminTestProject.Incidents.IncidentDetails.Pages.IncidentTabs.BaseIncidentTabs;
 using static DetailsTab;
 using static GeneralTab;
@@ -10,6 +12,7 @@ using static IncidentDataFactory;
 using static MedicationTab;
 using static StateTab;
 using static SummaryTab;
+using static CareAdminTestProject.Common.PlaywrightExtensions;
 using Log = CareAdminTestProject.Common.TestLog;
 
 namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
@@ -46,7 +49,7 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
     ///                                      <see cref="ClearDetailsForm"/> </description> </item>
     ///   <item> <description> Attachment Streaming: <see cref="UploadAttachmentTabAsync(string, string, string, bool)"/>, 
     ///                                              <see cref="UploadAttachmentTabAsync(IReadOnlyList{string}, string, string, bool)"/> </description> </item>
-    ///   <item> <description> Submission Button Evaluation: <see cref="VerifyCreateButtonIsDisabledAsync"/>, 
+    ///   <item> <description> Submission Button Evaluation: <see cref="VerifyCreateButtonStateAsync"/>, 
     ///                                                      <see cref="ClickCreateIncidentAsync"/>, 
     ///                                                      <see cref="ClickSaveIncidentAsync(bool)"/> </description> </item>
     ///   <item> <description> Form Actions Toggling: <see cref="SignSummaryAndVerifyAsync"/>, 
@@ -56,10 +59,17 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
     ///   <item> <description> Intentionally Trigger Form Dirtiness: <see cref="ModifySingleFieldOnTabAsync(string)"/> </description> </item>
     ///   <item> <description> UI Indicator Checkpoints: <see cref="VerifyUnsavedChangesAlertVisibleAsync(string)"/>, 
     ///                                                  <see cref="VerifyFieldsOneByOneWithFilling(object, object)"/>, 
-    ///                                                  <see cref="VerifyAllFieldsDotsStateAsync{T}(object, T, bool)"/>, <see cref="VerifyStateTabSpecificLogicAsync"/>, <see cref="VerifyRedDotField(object, string, bool)"/>, <see cref="VerifyMedicationTabFullLifecycleAndIndicatorAsync"/>, <see cref="FillRNFormTabWithTabCheckAsync(IncidentTestData)"/>, <see cref="VerifyRedDotTab(string, bool)"/> </description> </item>
+    ///                                                  <see cref="VerifyAllFieldsDotsStateAsync{T}(object, T, bool)"/>, 
+    ///                                                  <see cref="VerifyStateTabSpecificLogicAsync"/>, 
+    ///                                                  <see cref="VerifyRedDotField(object, string, bool)"/>, 
+    ///                                                  <see cref="VerifyMedicationTabFullLifecycleAndIndicatorAsync"/>, 
+    ///                                                  <see cref="VerifyTomorrowIsDisabledInCalendarAsync"/>, 
+    ///                                                  <see cref="VerifyFutureTimeIsDisabledInPickerAsync"/>, 
+    ///                                                  <see cref="FillRNFormTabWithTabCheckAsync(IncidentTestData)"/>, 
+    ///                                                  <see cref="VerifyRedDotTab(string, bool)"/> </description> </item>
     /// </list>
     /// </summary>
-    /// </summary>
+
     public class IncidentDetailsSteps
     {
         private readonly IPage _page;
@@ -103,21 +113,13 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
         public async Task<ResidentInfo> SelectResidentAsync(int i)
         {
             Log.Debug($"Try to select resident with the index {i} in the list");
-
-            // Метод страницы успешно выбирает резидента и возвращает информацию
             var info = await _createPage.SelectResidentAsyncByInd(i);
 
-            Log.Debug($"Resident successfully selected in dropdown: {info.Name}. Verifying UI link container...");
-
-            // Стабилизируем проверку: сначала ждем, чтобы сам элемент ссылки появился в DOM
             var residentNameLink = _page.Locator("a.link.resident-name").First;
             await residentNameLink.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 10000 });
-
-            // Теперь проверяем текст
             await Assertions.Expect(residentNameLink).ToContainTextAsync(info.Name, new() { Timeout = 5000 });
 
-            Log.Debug($"Resident is selected {info.Name}");
-            return info;
+            return info; // Никакого бреда с API, просто чистый UI-объект!
         }
         /// <summary>
         /// Extracts and tracks the exact text address string from the browser's active window layout location locator properties.
@@ -511,16 +513,30 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
         }
 
         /// <summary>
-        /// Enforces explicit verification assertions confirming that the primary "Create" action button is disabled.
+        /// Verifies whether the 'Create' button is enabled or disabled based on the expected state.
         /// </summary>
-        /// <returns>A task representing the asynchronous operation.</returns>
-        public async Task VerifyCreateButtonIsDisabledAsync()
+        /// <param name="shouldBeEnabled">True if the button should be active; false if it should be locked.</param>
+        public async Task VerifyCreateButtonStateAsync(bool shouldBeEnabled)
         {
             // Retrieve the button locator via your page class
             var createButton = await _createPage.GetCreateIncidentButtonLocator();
 
-            // Check the standard HTML disabled attribute
-            await Assertions.Expect(createButton).ToBeDisabledAsync();
+            if (shouldBeEnabled)
+            {
+                Log.Information("Verifying that the 'Create' button is ENABLED...");
+                await Assertions.Expect(createButton).ToBeEnabledAsync(new()
+                {
+                    Timeout = 5000 // Small timeout since the state change should be immediate
+                });
+            }
+            else
+            {
+                Log.Information("Verifying that the 'Create' button is DISABLED...");
+                await Assertions.Expect(createButton).ToBeDisabledAsync(new()
+                {
+                    Timeout = 5000
+                });
+            }
         }
 
 
@@ -582,6 +598,136 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
                     throw new ArgumentException($"Universal validation check framework is not configured for data type specification: {tabData.GetType().Name}");
             }
         }
+        /// <summary>
+        /// Verifies that tomorrow's date cell in the Kendo UI calendar popup is strictly disabled 
+        /// using native keyboard arrow navigation to handle month transitions flawlessly.
+        /// </summary>
+        public async Task VerifyTomorrowIsDisabledInCalendarAsync()
+        {
+            Log.Debug("[CALENDAR_VALIDATION] Opening Kendo Calendar popup...");
+
+            var calendarIcon = _createPage.General.GetFieldIconByName("dateOfIncident");
+            await calendarIcon.ClickAsync();
+
+            var calendarPopup = _page.Locator("kendo-popup kendo-calendar, .k-calendar-popup");
+            await calendarPopup.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5000 });
+
+            Log.Debug("[CALENDAR_VALIDATION] Attempting to force focus past today using multiple 'ArrowRight' presses...");
+
+            // 1. Встаем на таблицу календаря
+            var activeCalendarTable = calendarPopup.Locator("table.k-calendar-table, .k-calendar-view").First;
+            await activeCalendarTable.FocusAsync();
+
+            // 2. Спамим стрелку вправо 3 раза. Если блокировка работает, фокус застрянет на 21 числе
+            await _page.Keyboard.PressAsync("ArrowRight");
+            await _page.Keyboard.PressAsync("ArrowRight");
+            await _page.Keyboard.PressAsync("ArrowRight");
+            await _page.WaitForTimeoutAsync(100);
+
+            // 3. Нажимаем Enter, чтобы попытаться применить то, куда дошел селектор
+            await _page.Keyboard.PressAsync("Enter");
+
+            // Ждем закрытия попапа
+            await Assertions.Expect(calendarPopup).ToBeHiddenAsync(new() { Timeout = 3000 });
+
+            // 4. Читаем то, что в итоге записалось в инпут формы инцидента
+            // Используем твой базовый метод получения значения по лейблу
+            string actualDateInInput = await _createPage.General.GetFieldValueByLabelAsync("Date of Incident");
+
+            // Вычисляем эталонную строку сегодняшнего дня в системном формате формы (M/d/yyyy)
+            string todayDateStr = DateTime.Today.ToString("M/d/yyyy", System.Globalization.CultureInfo.InvariantCulture);
+
+            Log.Debug($"[CALENDAR_VALIDATION] Applied Date in Input: '{actualDateInInput}', Today Expected: '{todayDateStr}'");
+
+            // Проверяем: в инпуте должно остаться СЕГОДНЯ, так как дальше система не должна была пустить
+            Assert.That(actualDateInInput, Is.EqualTo(todayDateStr),
+                $"Validation Error: The calendar allowed navigating to a future date! Expected field to stay '{todayDateStr}', but got '{actualDateInInput}'.");
+
+            Log.Information("[CALENDAR_VALIDATION] Success: Calendar successfully blocked future date selection.");
+        }
+
+        /// <summary>
+        /// Verifies that future minute options in the Kendo TimePicker are disabled or missing when 'Today' is selected.
+        /// </summary>
+        public async Task VerifyFutureTimeIsDisabledInPickerAsync()
+        {
+            Log.Debug("[TIME_VALIDATION] Ensuring 'Today' is selected first...");
+            // Гарантированно выбираем сегодня (твой метод)
+            await _createPage.General.SelectTodayAsync("dateOfIncident");
+
+            Log.Debug("[TIME_VALIDATION] Opening Kendo TimePicker popup...");
+            // Открываем пикер времени (твой метод)
+            var pickerContainer = _page.Locator($"kendo-timepicker[name='{"timeOfIncident"}']");
+            await pickerContainer.Locator("button.k-input-button").ClickAsync();
+
+            // Ждем появления попапа со стрелками/колесиками времени Kendo
+            var timePopup = _page.Locator("kendo-popup:visible, .k-animation-container:visible").First;
+            await timePopup.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5000 });
+
+            try
+            {
+                // 3. Находим все колонки списков времени (Часы, Минуты, AM/PM) внутри попапа
+                // Обычно это элементы kendo-timelist или блоки с классом .k-time-list
+                var timeLists = timePopup.Locator("kendo-timelist, .k-time-list");
+                int listsCount = await timeLists.CountAsync();
+
+                // Проходимся по каждой доступной колонке (их может быть 2 или 3 в зависимости от формата)
+                for (int i = 0; i < listsCount; i++)
+                {
+                    var currentList = timeLists.Nth(i);
+
+                    // Находим самый последний активный элемент в текущей колонке
+                    var lastItem = currentList.Locator(".k-item:not(.k-state-disabled)").Last;
+
+                    if (await lastItem.CountAsync() > 0)
+                    {
+                        // Скроллим элемент в область видимости (Playwright автоматически прокрутит контейнер)
+                        await lastItem.ScrollIntoViewIfNeededAsync();
+                        // Кликаем по последнему доступному значению
+                        await lastItem.ClickAsync(new() { Force = true });
+                    }
+                }
+
+                // 4. Нажимаем кнопку "Set" для подтверждения (синяя кнопка на вашем скриншоте)
+                var setButton = timePopup.GetByRole(AriaRole.Button).Filter(new() { HasText = "Set" });
+                if (await setButton.CountAsync() > 0)
+                {
+                    await setButton.ClickAsync();
+                }
+                else
+                {
+                    // Фолбек, если кнопка определяется по классу
+                    await timePopup.Locator(".k-time-accept, button.k-time-accept").ClickAsync();
+                }
+
+                // Ожидаем закрытия попапа
+                // Ожидаем закрытия попапа (он исчезает из DOM)
+                await timePopup.WaitForAsync(new() { State = WaitForSelectorState.Hidden });
+
+                // 5. ИСПРАВЛЕНО: Считываем значение из инпута внутри pickerContainer, а не из закрытого попапа!
+                var inputField = pickerContainer.Locator("input");
+                string selectedTime = await inputField.InputValueAsync();
+
+                Log.Debug($"[TIME_VALIDATION] Read value from input: '{selectedTime}'");
+
+                // Парсим значение (на скриншоте формат "7:13 PM", что соответствует "h:mm tt")
+                DateTime actualTime = DateTime.ParseExact(selectedTime, "h:mm tt", System.Globalization.CultureInfo.InvariantCulture);
+                DateTime currentTime = DateTime.Now;
+
+                TimeSpan actualTimeSpan = actualTime.TimeOfDay;
+                TimeSpan currentTimeSpan = currentTime.TimeOfDay;
+
+                Assert.That(actualTimeSpan, Is.LessThanOrEqualTo(currentTimeSpan),
+                       $"Validation failed! The picker allowed selecting a future time: {selectedTime}, while current time is {currentTime.ToString("h:mm tt")}");
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"Error while scrolling time picker columns: {ex.Message}");
+                await _page.MakeScreenshotAsync("Attachment_Filled"); ;
+                throw;
+            }
+        }
+
 
         /// <summary>
         /// Targets and modifies a single input component on the specified form tab to intentionally trigger form dirtiness states.
@@ -614,6 +760,23 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
                 case "Summary":
                     await _createPage.Summary.SelectQuestionRadioAsync("Based upon the collection and review of all attached information, the following conclusion has been reached:", "Undetermined");
                     break;
+            }
+        }
+
+        public async Task<String> VerifySingleFieldOnTabAsync(string tabName, string label)
+        {
+            switch (tabName)
+            {
+                case "General":
+                    return await _createPage.General.GetFieldByLabel(label).InputValueAsync();
+                case "Details":
+                    return await _createPage.Details.GetFieldByLabel(label).InputValueAsync();
+                case "State":
+                    return await _createPage.State.GetFieldByLabel(label).InputValueAsync();
+                case "Summary":
+                    return await _createPage.Summary.GetFieldByLabel(label).InputValueAsync();
+                default:
+                    return "";
             }
         }
 
@@ -712,33 +875,75 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
         /// <returns>A task representing the asynchronous operation.</returns>
         public async Task NavigateToTrackerViaMenu()
         {
-            var parentMenu = _page.Locator("li").Filter(new() { HasText = "Accident/Incident" });
-            var trackerLink = parentMenu.Locator("a").Filter(new() { HasText = "Tracker" });
-            if (!await trackerLink.IsVisibleAsync())
+            const int maxRetries = 3;
+
+            for (int attempt = 1; attempt <= maxRetries; attempt++)
             {
-                var menuTrigger = parentMenu.Locator(".k-icon, .arrow-icon, span, a")
-                                            .GetByText("Accident/Incident", new() { Exact = false })
-                                            .First;
+                try
+                {
+                    Log.Debug($"[NAVIGATION] Attempt {attempt} of {maxRetries}: Checking current page state...");
 
-                await menuTrigger.ClickAsync();
-                await trackerLink.WaitForAsync(new() { State = WaitForSelectorState.Visible });
+                    var newIncidentBtn = _page.GetByRole(AriaRole.Button, new() { Name = "New Incident" });
+
+                    // Fast track: if we are already on the tracker page and the main action button is visible, skip navigation
+                    if (_page.Url.Contains("/tracker", StringComparison.OrdinalIgnoreCase) && await newIncidentBtn.IsVisibleAsync())
+                    {
+                        Log.Information("[NAVIGATION] Already on the Tracker page with active UI. Skipping menu interaction.");
+                        return;
+                    }
+
+                    Log.Debug("[NAVIGATION] Opening Tracker via menu...");
+
+                    var parentMenu = _page.Locator("li").Filter(new() { HasText = "Accident/Incident" });
+                    var trackerLink = parentMenu.Locator("a").Filter(new() { HasText = "Tracker" });
+
+                    if (!await trackerLink.IsVisibleAsync())
+                    {
+                        Log.Debug("[NAVIGATION] Sidebar panel is collapsed. Triggering menu expansion...");
+                        var menuTrigger = parentMenu.Locator(".k-icon, .arrow-icon, span, a")
+                                                    .GetByText("Accident/Incident", new() { Exact = false })
+                                                    .First;
+
+                        // Force click if the menu is covered by a fading overlay or transition
+                        await menuTrigger.ClickAsync(new() { Force = true });
+                        await trackerLink.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5000 });
+                    }
+
+                    Log.Debug("[NAVIGATION] Clicking on the Tracker link...");
+                    await trackerLink.ClickAsync();
+
+                    Log.Debug("[NAVIGATION] Waiting for 'New Incident' button to ensure page is loaded...");
+                    // Reduced initial timeout per attempt to fail fast and retry if UI is frozen
+                    await newIncidentBtn.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 10000 });
+
+                    var trackerSpinner = _page.Locator(".loading-overlay, .spinner, kendo-textbox-loading-icon, [class*='loading']").First;
+
+                    if (await trackerSpinner.IsVisibleAsync())
+                    {
+                        Log.Debug("[NAVIGATION] Tracker page loading spinner detected. Waiting for data grid to stabilize...");
+                        await trackerSpinner.WaitForAsync(new() { State = WaitForSelectorState.Hidden, Timeout = 20000 });
+                    }
+
+                    await Task.Delay(500);
+                    Log.Information($"[NAVIGATION SUCCESS] Navigated to Tracker menu successfully on attempt {attempt}.");
+                    return; // Success! Exit the method.
+                }
+                catch (Exception ex)
+                {
+                    Log.Warning($"[NAVIGATION FAILED] Attempt {attempt} failed. Current URL: {_page.Url}. Error: {ex.Message}");
+
+                    if (attempt == maxRetries)
+                    {
+                        Log.Error($"[NAVIGATION CRITICAL] Failed to navigate to Tracker after {maxRetries} attempts.");
+                        throw;
+                    }
+
+                    // Refreshing the page before the next attempt can clear broken UI/Kendo states
+                    Log.Debug("[NAVIGATION RETRY] Refreshing page state before next navigation attempt...");
+                    await _page.ReloadAsync(new() { WaitUntil = WaitUntilState.Commit });
+                    await Task.Delay(1500);
+                }
             }
-            await trackerLink.ClickAsync();
-
-            var newIncidentBtn = _page.GetByRole(AriaRole.Button, new() { Name = "New Incident" });
-            await newIncidentBtn.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 20000 });
-
-            var trackerSpinner = _page.Locator(".loading-overlay, .spinner, kendo-textbox-loading-icon, [class*='loading']").First;
-
-            if (await trackerSpinner.IsVisibleAsync())
-            {
-                Log.Debug("Tracker page loading spinner detected. Waiting for data grid to stabilize...");
-                await trackerSpinner.WaitForAsync(new() { State = WaitForSelectorState.Hidden, Timeout = 30000 });
-            }
-
-            await Task.Delay(500);
-
-            Log.Debug("Navigated to Tracker menu successfully");
         }
 
         /// <summary>
@@ -1025,6 +1230,108 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
         public async Task SwitchFirstAid(bool answer)
         {
             await _createPage.Details.SelectFirstAdmitedAsync(answer, "");
+        }
+
+        /// <summary>
+        /// Captures the 'employees' API response and verifies that UI staff dropdowns 
+        /// contain the correct number of records according to employment status (active vs terminated).
+        /// </summary>
+        public async Task VerifyStaffDropdownsCountWithApiAsync()
+        {
+
+            var jsonString = await _page.ApiPostRequest("employees");
+
+            Assert.That(jsonString, Does.Not.Contain("Network Error"), $"Full JSON output was:\n{jsonString}");
+
+
+
+            // Парсим корневой JSON
+            using var doc = System.Text.Json.JsonDocument.Parse(jsonString);
+            var root = doc.RootElement;
+
+            List<System.Text.Json.JsonElement> recordsArray;
+
+            // Если корень — это массив (как говорит ошибка)
+            if (root.ValueKind == System.Text.Json.JsonValueKind.Array)
+            {
+                recordsArray = root.EnumerateArray().ToList();
+            }
+            // На всякий случай оставляем проверку свойства records, если на разных стендах структура отличается
+            else if (root.TryGetProperty("records", out var recordsProp) && recordsProp.ValueKind == System.Text.Json.JsonValueKind.Array)
+            {
+                recordsArray = recordsProp.EnumerateArray().ToList();
+            }
+            else
+            {
+                Assert.Fail("API Response Error: Root JSON element is neither an Array nor an Object with 'records' property.");
+                return;
+            }
+
+            // Вычисляем эталонные значения на основе твоей бизнес-гипотезы
+            int totalEmployeesInApi = recordsArray.Count;
+
+            // Считаем активных сотрудников (termDate == null)
+            int activeEmployeesInApi = recordsArray.Count(e =>
+                e.TryGetProperty("termDate", out var termProp) && termProp.ValueKind == System.Text.Json.JsonValueKind.Null);
+
+            Log.Information($"[STAFF_VALIDATION] API Data Stats -> Total: {totalEmployeesInApi}, Active (termDate == null): {activeEmployeesInApi}");
+
+            // Считаем реальное количество элементов на UI для каждого дропдауна
+            int uiSupervisorCount = await GetMaterialDropdownOptionsCountAsync("Supervisor");
+            int uiChargeNurseCount = await GetMaterialDropdownOptionsCountAsync("Charge nurse");
+            int uiCnaCount = await GetMaterialDropdownOptionsCountAsync("CNA");
+
+            Log.Information($"[STAFF_VALIDATION] UI Data Stats -> Supervisor: {uiSupervisorCount}, Charge Nurse: {uiChargeNurseCount}, CNA: {uiCnaCount}");
+
+            // Финальные ассерты согласно твоей гипотезе
+            Assert.Multiple(() =>
+            {
+                // Гипотеза 1: В Supervisor только активные (termDate == null)
+                Assert.That(uiSupervisorCount, Is.EqualTo(activeEmployeesInApi),
+                    $"Staff Mismatch: 'Supervisor' dropdown should display ONLY active employees ({activeEmployeesInApi}), but displays {uiSupervisorCount}.");
+
+                // Гипотеза 2: В Charge Nurse и CNA доступны все сотрудники (включая уволенных)
+                Assert.That(uiChargeNurseCount, Is.EqualTo(totalEmployeesInApi),
+                    $"Staff Mismatch: 'Charge Nurse' dropdown should display ALL employees ({totalEmployeesInApi}), but displays {uiChargeNurseCount}.");
+
+                Assert.That(uiCnaCount, Is.EqualTo(totalEmployeesInApi),
+                    $"Staff Mismatch: 'CNA' dropdown should display ALL employees ({totalEmployeesInApi}), but displays {uiCnaCount}.");
+            });
+
+            Log.Information("[STAFF_VALIDATION] Hypothesis successfully confirmed! Employee counts match API filters.");
+        }
+
+        /// <summary>
+        /// Helper method to open a Kendo dropdown by its label, count its items, and close it safely.
+        /// </summary>
+        private async Task<int> GetMaterialDropdownOptionsCountAsync(string dropdownLabel)
+        {
+            Log.Debug($"[STAFF_VALIDATION] Opening dropdown for: '{dropdownLabel}'...");
+
+            var fieldContainer = _page.Locator("cad-label-value-field, .panel-line div")
+                                      .Filter(new() { HasText = dropdownLabel })
+                                      .First;
+
+            var dropdownTrigger = fieldContainer.Locator("mat-select, [role='combobox']").First;
+            await dropdownTrigger.ClickAsync();
+
+            var overlayPanel = _page.Locator(".cdk-overlay-pane, .mat-mdc-select-panel, [role='listbox']").Last;
+            await overlayPanel.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5000 });
+
+            var listItems = overlayPanel.Locator("mat-option, .mat-mdc-option, [role='option']");
+            int count = await listItems.CountAsync();
+
+            Log.Debug($"[STAFF_VALIDATION] Dropdown '{dropdownLabel}' contains {count} items on UI.");
+
+            // --- НЕУБИВАЕМОЕ ЗАКРЫТИЕ ЧЕРЕЗ ESCAPE ---
+            // Нажимаем клавишу Escape — Angular Material гарантированно закроет оверлей любой длины
+            await _page.Keyboard.PressAsync("Escape");
+
+            // Ждем, пока оверлей полностью исчезнет из DOM, чтобы не мешать следующему шагу
+            await Assertions.Expect(overlayPanel).ToBeHiddenAsync(new() { Timeout = 3000 });
+            await _page.WaitForTimeoutAsync(200);
+
+            return count;
         }
     }
 }

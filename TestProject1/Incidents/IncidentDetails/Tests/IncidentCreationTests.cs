@@ -92,7 +92,7 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
             await steps.FillGeneralTabAsync(invalidData);
 
             // 5. Enforce strict assertions verifying that the structural 'Create' wizard action button registers as disabled (Approach A)
-            await steps.VerifyCreateButtonIsDisabledAsync();
+            await steps.VerifyCreateButtonStateAsync(shouldBeEnabled: false);
 
             // Alternative Evaluation Approach B:
             // await steps.ClickCreateIncidentAsync(shouldBeEnabled: false);
