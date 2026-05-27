@@ -115,7 +115,7 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Pages.IncidentTabs
         /// </summary>
         /// <param name="buttonText">The text displayed on the target button.</param>
         /// <returns>An <see cref="ILocator"/> pointing to the button component.</returns>
-        protected ILocator GetButtonByText(string buttonText)
+        public ILocator GetButtonByText(string buttonText)
         {
             // Searches specifically for a button with the specified text (case-insensitive)
             return Page.GetByRole(AriaRole.Button, new() { Name = buttonText });
@@ -466,6 +466,49 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Pages.IncidentTabs
         /// <returns>An <see cref="ILocator"/> pointing to the target field's completeness indicator span component.</returns>
         public async Task<ILocator> GetRedDotLocatorAsync(string fieldName)
         {
+            // === НАЧАЛО ЖЕЛЕЗОБЕТОННОЙ ВСТАВКИ ПО ВЕРСТКЕ ANGULAR ===
+            if (fieldName.StartsWith("Injuries Sustained") && fieldName != "Injuries Sustained")
+            {
+                Log.Debug($"[InjuryRedDot Diagnostic] Entered dynamic branch for field: '{fieldName}'");
+
+                var numberString = fieldName.Replace("Injuries Sustained", "").Trim();
+                if (int.TryParse(numberString, out int rowNumber))
+                {
+                    int index = rowNumber - 1; // 2 превращаем в индекс 1 для Playwright
+                    Log.Debug($"[InjuryRedDot Diagnostic] Parsed row number: {rowNumber}, target index: {index}");
+
+                    // 1. Находим все строки травм по стабильному классу из верстки
+                    var allRows = Page.Locator("div.injury-line");
+
+                    int rowsCount = await allRows.CountAsync();
+                    Log.Debug($"[InjuryRedDot Diagnostic] Total physical injury lines found: {rowsCount}");
+
+                    // 2. Выбираем нужную по индексу строку
+                    var targetRow = allRows.Nth(index);
+
+                    // 3. Внутри этой строки берем САМОЕ ПЕРВОЕ поле cad-label-value-field (это всегда Injuries Sustained)
+                    var firstFieldInRow = targetRow.Locator("cad-label-value-field").Nth(0);
+
+                    // 4. Забираем его красную точку
+                    var indicator = firstFieldInRow.Locator("span.completeness-indicator, span.red-dot, .k-required");
+
+                    int indicatorsCount = await indicator.CountAsync();
+                    Log.Debug($"[InjuryRedDot Diagnostic] Indicators found inside targeted row field: {indicatorsCount}");
+
+                    if (indicatorsCount > 0)
+                    {
+                        bool isVisible = await indicator.First.IsVisibleAsync();
+                        Log.Debug($"[InjuryRedDot Diagnostic] Target indicator visibility status: {isVisible}");
+                        return indicator.First;
+                    }
+
+                    Log.Debug($"[InjuryRedDot Diagnostic] WARNING: Indicator not found in row. Returning empty locator.");
+                    return indicator;
+                }
+            }
+            // === КОНЕЦ ВСТАВКИ ПО ВЕРСТКЕ ===
+
+
             // 1. Check exact string matching configurations for Summary or Plan fields
             bool isSummaryField = fieldName.Equals("Summary", StringComparison.OrdinalIgnoreCase) ||
                                   fieldName.Equals("Enter summary", StringComparison.OrdinalIgnoreCase);

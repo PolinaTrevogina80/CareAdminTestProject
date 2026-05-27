@@ -123,6 +123,7 @@ public static class IncidentDataFactory
         return new(
             OccurrenceDescription: "Patient fell while walking",
             PatientDescription: "I slipped on the wet floor",
+            AllDiagnoses: "M43.10 - SPONDYLOLISTHESIS, SITE UNSPECIFIED",
             FirstAidAdministered: true,
             FirstAidDescribe: "Ice pack applied to left knee",
             VitalSigns: new DetailsTab.VitalSigns("98.6", "80", "120/80", "98", "118/75", "110"),

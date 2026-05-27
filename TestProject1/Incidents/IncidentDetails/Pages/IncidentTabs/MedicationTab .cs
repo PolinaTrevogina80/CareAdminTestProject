@@ -112,6 +112,72 @@ public class MedicationTab : BaseIncidentTabs
     }
 
     /// <summary>
+    /// Clicks the Delete button for a specific row index.
+    /// </summary>
+    public async Task DeleteMedicationRowAsync(int rowIndex)
+    {
+        // Находим кнопку Delete конкретной строки
+        await Page.GetByRole(AriaRole.Button, new() { Name = "Delete" }).Nth(rowIndex).ClickAsync();
+    }
+
+    /// <summary>
+    /// Fills specific fields in a medication row by its dynamic index without adding a new row.
+    /// Useful for atomized cell-filling validation tests.
+    /// </summary>
+    public async Task FillMedicationRowAsync(int rowIndex, string medName = "", string dosage = "", string frequency = "", string time = "")
+    {
+        // Находим контейнер строки по её индексу
+        var row = Page.Locator(".medication-row.ng-star-inserted").Nth(rowIndex);
+
+        // Дожидаемся появления строки в DOM-дереве перед вводом данных
+        await row.WaitForAsync(new() { State = WaitForSelectorState.Visible });
+
+        // Заполняем только те поля, значения для которых были переданы в метод
+        if (medName != null) await row.Locator("input").Nth(0).FillAsync(medName);
+        if (dosage != null) await row.Locator("input").Nth(1).FillAsync(dosage);
+        if (frequency != null) await row.Locator("input").Nth(2).FillAsync(frequency);
+        if (time != null) await row.Locator("input").Nth(3).FillAsync(time);
+
+        // Имитируем выход из поля (blur), чтобы Angular зафиксировал изменения для валидации
+        await row.Locator("input").Nth(0).PressAsync("Tab");
+    }
+
+    /// <summary>
+    /// Clears text content from all input fields of a specific medication row by its index.
+    /// </summary>
+    public async Task ClearMedicationRowAsync(int rowIndex)
+    {
+        var row = Page.Locator(".medication-row.ng-star-inserted").Nth(rowIndex);
+
+        // Очищаем ячейки последовательно
+        await row.Locator("input").Nth(0).ClearAsync();
+        await row.Locator("input").Nth(1).ClearAsync();
+        await row.Locator("input").Nth(2).ClearAsync();
+        await row.Locator("input").Nth(3).ClearAsync();
+
+        // Триггерим событие валидации
+        await row.Locator("input").Nth(0).PressAsync("Tab");
+    }
+
+    /// <summary>
+    /// Verifies the total number of medication rows currently present on the UI.
+    /// </summary>
+    public async Task VerifyMedicationRowsCountAsync(int expectedCount)
+    {
+        var rows = Page.Locator(".medication-row.ng-star-inserted");
+        await Assertions.Expect(rows).ToHaveCountAsync(expectedCount);
+    }
+
+    /// <summary>
+    /// Validates the text content of the primary Medication Name field inside a designated row.
+    /// </summary>
+    public async Task VerifyMedicationRowDataAsync(int rowIndex, string expectedMedName)
+    {
+        var medNameInput = Page.Locator(".medication-row.ng-star-inserted").Nth(rowIndex).Locator("input").Nth(0);
+        await Assertions.Expect(medNameInput).ToHaveValueAsync(expectedMedName);
+    }
+
+    /// <summary>
     /// Performs sorting-agnostic validation of current grid inputs against an expected list of medication configurations.
     /// </summary>
     /// <param name="expected">The reference dataset list holding expected configuration structures.</param>

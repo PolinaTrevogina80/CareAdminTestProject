@@ -1,5 +1,6 @@
 ﻿using CareAdminTestProject.Incidents.IncidentDetails.Pages.IncidentTabs;
 using Microsoft.Playwright;
+using static System.Net.Mime.MediaTypeNames;
 using Log = CareAdminTestProject.Common.TestLog;
 
 /// <summary>
@@ -294,7 +295,7 @@ public class StateTab : BaseIncidentTabs
     /// <param name="label">The exact inner text of the checkbox element to look for.</param>
     /// <param name="isChecked">The targeted boolean checkbox status.</param>
     /// <returns>A task representing the asynchronous operation.</returns>
-    private async Task SetCheckboxAsync(string label, bool isChecked)
+    public async Task SetCheckboxAsync(string label, bool isChecked)
     {
         // Search for the container using an exact match of the text inside the block
         var checkboxFieldContainer = Page.Locator(".checkbox-field:visible")
@@ -308,6 +309,7 @@ public class StateTab : BaseIncidentTabs
 
         // Read the current state of the native input element
         bool currentState = await nativeInput.IsCheckedAsync();
+        await Page.WaitForTimeoutAsync(200);
 
         if (currentState != isChecked)
         {

@@ -27,6 +27,7 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
     ///   <item> <description> Form Initialization: <see cref="OpenNewIncidentAsync"/> </description> </item>
     ///   <item> <description> Resident Matching:   <see cref="SelectResidentAsync(int)"/> </description> </item>
     ///   <item> <description> Routing Operations:  <see cref="GetCurrentUrlAsync"/>,
+    ///                                             <see cref="GetSelectedResidentIndexAsync"/>, 
     ///                                             <see cref="GoBackBrowserAsync"/>,
     ///                                             <see cref="LeavePageViaMenuAsync"/>,
     ///                                             <see cref="ReloadPageAndNavigateAsync(string)"/> </description> </item>
@@ -65,7 +66,11 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
     ///                                                  <see cref="VerifyMedicationTabFullLifecycleAndIndicatorAsync"/>, 
     ///                                                  <see cref="VerifyTomorrowIsDisabledInCalendarAsync"/>, 
     ///                                                  <see cref="VerifyFutureTimeIsDisabledInPickerAsync"/>, 
+    ///                                                  <see cref="VerifyResidentDiagnosesLoadedAsync"/>,
+    ///                                                  <see cref="VerifyDescribeFieldRedDotStateAsync"/>,
     ///                                                  <see cref="FillRNFormTabWithTabCheckAsync(IncidentTestData)"/>, 
+    ///                                                  <see cref="SetOtherTypeOfAlarmCheckboxAsync"/>, 
+    ///                                                  <see cref="VerifyOtherAlarmInputFieldStateAsync"/>, 
     ///                                                  <see cref="VerifyRedDotTab(string, bool)"/> </description> </item>
     /// </list>
     /// </summary>
@@ -728,6 +733,43 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
             }
         }
 
+        /// <summary>
+        /// Opens the resident dropdown, identifies the index of the currently selected resident, and closes the dropdown.
+        /// </summary>
+        /// <returns>The zero-based index of the selected resident.</returns>
+        public async Task<int> GetSelectedResidentIndexAsync()
+        {
+            // 1. Считываем имя резидента прямо из ссылки, которая видна на вашем скриншоте
+            var residentLink = _page.Locator("a.link.resident-name").First;
+            string selectedName = (await residentLink.TextContentAsync())?.Trim();
+
+            // 2. Локализуем сам выпадающий список выбора резидента (блок Name* вверху страницы)
+            // Судя по скриншоту, он находится внутри блока с пометкой Name
+            var residentDropdown = _page.Locator("mat-select[name='resident'], mat-select").First;
+            await residentDropdown.ClickAsync();
+            await Task.Delay(350); // Пауза для стабильного рендеринга оверлея Angular
+
+            // 3. Собираем все опции в открывшемся списке
+            var options = await _page.Locator("mat-mdc-option, mat-option").AllAsync();
+            int selectedIndex = 0;
+
+            // 4. Ищем индекс опции, текст которой совпадает с именем на ссылке
+            for (int i = 0; i < options.Count; i++)
+            {
+                var optionText = (await options[i].TextContentAsync())?.Trim();
+                if (optionText != null && optionText.Contains(selectedName))
+                {
+                    selectedIndex = i;
+                    break;
+                }
+            }
+
+            // 5. Закрываем список, чтобы не мешать дальнейшему тесту
+            await _page.Keyboard.PressAsync("Escape");
+            await Task.Delay(200);
+
+            return selectedIndex;
+        }
 
         /// <summary>
         /// Targets and modifies a single input component on the specified form tab to intentionally trigger form dirtiness states.
@@ -969,9 +1011,39 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
                 await action.Invoke();
 
                 //await _page.Keyboard.PressAsync("Tab");
-                await Task.Delay(300);
+                await Task.Delay(500);
 
                 await VerifyRedDotField(tabComponent, field.Key, false);
+            }
+        }
+
+        /// <summary>
+        /// Verifies whether the resident's diagnoses are correctly loaded and displayed in the "All Diagnoses" textarea,
+        /// dynamically handling both cases: when the resident has diagnoses and when the list is empty.
+        /// </summary>
+        /// <param name="expectedDiagnoses">The list of expected diagnoses from test data. Can be null or empty.</param>
+        /// <returns>A task representing the asynchronous operation.</returns>
+        public async Task VerifyResidentDiagnosesLoadedAsync(string expectedDiagnoses)
+        {
+            var label = "All Diagnoses";
+
+            // Используем твой базовый метод получения текста из input/textarea fields
+            var actualText = await CreatePage.GetFieldValueByLabelAsync(label);
+
+            // Сценарий 1: У резидента в тестовых данных НЕТ диагнозов
+            if (expectedDiagnoses == null || !expectedDiagnoses.Any())
+            {
+                Assert.That(actualText.Trim(), Is.EqualTo(string.Empty),
+                    $"Ожидалось, что поле '{label}' будет пустым, но обнаружен текст: {actualText}");
+
+                return;
+            }
+
+            // Сценарий 2: У резидента ЕСТЬ диагнозы в тестовых данных
+            foreach (var diagnosis in expectedDiagnoses)
+            {
+                Assert.That(actualText, Does.Contain(diagnosis),
+                    $"Диагноз '{diagnosis}' не найден в поле '{label}'. Текущий текст на UI: {actualText}");
             }
         }
 
@@ -1065,6 +1137,7 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
         /// <returns>A task representing the asynchronous operation.</returns>
         public async Task VerifyRedDotField(object tabComponent, string fieldName, bool shouldBeVisible = true)
         {
+
             // NOTE: Review debug log
             Log.Debug($"Red Dot validation for the field '{fieldName}': is expected {shouldBeVisible}");
 
@@ -1080,6 +1153,59 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
 
             // NOTE: Review debug log
             Log.Debug($"Red Dot validation for the field '{fieldName}': {(isVisible ? "true" : "false")}");
+        }
+
+        /// <summary>
+        /// Verifies the presence or absence of the required indicator (red dot) for the First Aid Describe field.
+        /// </summary>
+        /// <param name="shouldHaveDot">True if the red dot is expected to be visible; otherwise, false.</param>
+        /// <returns>A task representing the asynchronous operation.</returns>
+        public async Task VerifyDescribeFieldRedDotStateAsync(bool shouldHaveDot)
+        {
+            // 1. Локализуем блок лейбла по тексту "Describe"
+            var labelContainer = _page.Locator(".lv-label", new() { HasText = "Describe" });
+
+            // 2. Находим внутри него конкретный элемент красной точки по классу из верстки
+            var redDot = labelContainer.Locator("span.completeness-indicator");
+
+            if (shouldHaveDot)
+            {
+                // Ждем, когда Angular уберет скрывающие стили и точка физически появится на UI
+                await Assertions.Expect(redDot).ToBeVisibleAsync(new() { Timeout = 3000 });
+                Log.Debug("Визуальная проверка: красная точка ОТОБРАЖАЕТСЯ у поля Describe.");
+            }
+            else
+            {
+                // Ждем, когда Angular навесит скрывающие стили (например, display: none) и точка исчезнет с экрана
+                await Assertions.Expect(redDot).ToBeHiddenAsync(new() { Timeout = 3000 });
+                Log.Debug("Визуальная проверка: красная точка СКРЫТА у поля Describe.");
+            }
+        }
+
+
+        /// <summary>
+        /// Verifies whether the input field under 'Other Type of Alarm' is active (editable) or disabled.
+        /// </summary>
+        /// <param name="shouldBeActive">True if the field must be active; False if it must be disabled.</param>
+        public async Task VerifyOtherAlarmInputFieldStateAsync(bool shouldBeActive)
+        {
+            Log.Debug($"Verifying that Other Type of Alarm input field active state is: {shouldBeActive}");
+
+            // Железобетонный локатор по атрибуту name, который мы увидели в DevTools
+            var inputField = _page.Locator("input[name='otherTypeOfAlarm']");
+
+            if (shouldBeActive)
+            {
+                // Проверяем, что Angular убрал блокировку и поле доступно для ввода
+                await Assertions.Expect(inputField).ToBeEditableAsync(new() { Timeout = 2000 });
+                Log.Debug("Проверено: поле ввода 'Other Type of Alarm' АКТИВНО.");
+            }
+            else
+            {
+                // Проверяем, что поле заблокировано (disabled)
+                await Assertions.Expect(inputField).ToBeDisabledAsync(new() { Timeout = 2000 });
+                Log.Debug("Проверено: поле ввода 'Other Type of Alarm' ЗАБЛОКИРОВАНО.");
+            }
         }
 
         /// <summary>
@@ -1213,13 +1339,14 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
         /// Captures and caches the state text from the Diagnoses field tree before purging the current active workspace text block.
         /// </summary>
         /// <returns>A task representing the asynchronous operation.</returns>
-        public async Task ClearDetailsForm()
+        public async Task<string> ClearDetailsForm()
         {
             // NOTE: Review debug log
             Log.Debug("Try to clear All Diagnoses");
-            await _createPage.Details.ClearAndSaveDiagnosesAsync();
+            string diagnoses = await _createPage.Details.ClearAndSaveDiagnosesAsync();
             // NOTE: Review debug screenshot sequence
             await _page.MakeScreenshotAsync("AllDiagnoses_cleared");
+            return diagnoses;
         }
 
         /// <summary>
@@ -1230,6 +1357,7 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
         public async Task SwitchFirstAid(bool answer)
         {
             await _createPage.Details.SelectFirstAdmitedAsync(answer, "");
+            await Task.Delay(300);
         }
 
         /// <summary>

@@ -89,10 +89,10 @@ public class GeneralTab : BaseIncidentTabs
     /// <param name="depth">The physical depth dimension property parameter.</param>
     public record InjuryInfo(
         string injury,
-        string site,
-        string length,
-        string width,
-        string depth
+        string? site,
+        string? length,
+        string? width,
+        string? depth
     );
 
     /// <summary>
@@ -252,14 +252,33 @@ public class GeneralTab : BaseIncidentTabs
     /// <returns>A task that represents the asynchronous operation.</returns>
     public async Task AddInjuryAsync(int i, InjuryInfo injury)
     {
-        // Selecting dropdowns for Injury line
-        await SelectDropdownOptionAsync("Injuries Sustained", injury.injury, i);
-        await SelectDropdownOptionAsync("Site of Injury", injury.site, i);
+        // 1. Обязательный дропдаун (всегда заполняем)
+        if (!string.IsNullOrEmpty(injury.injury))
+        {
+            await SelectDropdownOptionAsync("Injuries Sustained", injury.injury, i);
+        }
 
-        // For regular input fields (Fill) we leave it as it was:
-        await GetFieldByLabel("Length (Centimeters)").Nth(i).FillAsync(injury.length);
-        await GetFieldByLabel("Width (Centimeters)").Nth(i).FillAsync(injury.width);
-        await GetFieldByLabel("Depth (Centimeters)").Nth(i).FillAsync(injury.depth);
+        // 2. Необязательный дропдаун — заполняем ТОЛЬКО если передано значение
+        if (!string.IsNullOrEmpty(injury.site))
+        {
+            await SelectDropdownOptionAsync("Site of Injury", injury.site, i);
+        }
+
+        // 3. Инпуты размеров — заполняем ТОЛЬКО если они не null
+        if (!string.IsNullOrEmpty(injury.length))
+        {
+            await GetFieldByLabel("Length (Centimeters)").Nth(i).FillAsync(injury.length);
+        }
+
+        if (!string.IsNullOrEmpty(injury.width))
+        {
+            await GetFieldByLabel("Width (Centimeters)").Nth(i).FillAsync(injury.width);
+        }
+
+        if (!string.IsNullOrEmpty(injury.depth))
+        {
+            await GetFieldByLabel("Depth (Centimeters)").Nth(i).FillAsync(injury.depth);
+        }
     }
 
     /// <summary>

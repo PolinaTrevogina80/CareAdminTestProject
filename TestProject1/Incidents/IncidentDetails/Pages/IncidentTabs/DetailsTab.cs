@@ -16,6 +16,7 @@ public class DetailsTab : BaseIncidentTabs
     public record IncidentDetailsInfo(
         string OccurrenceDescription,
         string PatientDescription,
+        string AllDiagnoses,
         bool FirstAidAdministered,
         string FirstAidDescribe,
         VitalSigns VitalSigns,
@@ -29,7 +30,6 @@ public class DetailsTab : BaseIncidentTabs
         List<string> Witnesses
     );
 
-    private string AllDiagnises;
 
     /// <summary>
     /// Represents clinical vital signs recorded during the incident.
@@ -81,7 +81,7 @@ public class DetailsTab : BaseIncidentTabs
     {
         { "Describe Occurrence", (async () => await GetFieldByLabel("Describe Occurrence").FillAsync(data.OccurrenceDescription), true) },
         { "Patient's Description of Occurrence", (async () => await GetFieldByLabel("Patient’s Description of Occurrence").FillAsync(data.PatientDescription), true) },
-        { "All Diagnoses", (async () => await GetFieldByLabel("All Diagnoses").FillAsync(AllDiagnises), true)},
+        { "All Diagnoses", (async () => await GetFieldByLabel("All Diagnoses").FillAsync(data.AllDiagnoses), true)},
         // Vital Signs
         { "Temperature", (async () => await GetFieldByLabel("Temperature").FillAsync(data.VitalSigns.Temperature), true) },
         { "Pulse", (async () => await GetFieldByLabel("Pulse").FillAsync(data.VitalSigns.Pulse), true) },
@@ -147,11 +147,18 @@ public class DetailsTab : BaseIncidentTabs
         // Descriptions (Textareas)
         await GetFieldByLabel("Describe Occurrence").FillAsync(details.OccurrenceDescription);
         await GetFieldByLabel("Patient’s Description of Occurrence").FillAsync(details.PatientDescription);
-        if (!string.IsNullOrEmpty(AllDiagnises))
+        if (!string.IsNullOrEmpty(details.AllDiagnoses))
         {
-            await GetFieldByLabel("All Diagnoses").FillAsync(AllDiagnises);
+            await GetFieldByLabel("All Diagnoses").FillAsync(details.AllDiagnoses);
             // NOTE: Review debug log
             Log.Debug("All Diagnoses field restored from saved variable.");
+        }
+        else
+        {
+            // Кейс, когда диагнозы не подтянулись автоматически, но поле заполнить необходимо
+            const string fallbackText = "No specific diagnoses available, filling the field to bypass validation.";
+            await GetFieldByLabel("All Diagnoses").FillAsync(fallbackText);
+            Log.Debug($"All Diagnoses was empty. Filled with fallback text: '{fallbackText}'");
         }
 
         // Vital Signs
@@ -409,13 +416,19 @@ public class DetailsTab : BaseIncidentTabs
     /// Reads and stores the text from "All Diagnoses" field, then clears the input area.
     /// </summary>
     /// <returns>A task representing the asynchronous operation.</returns>
-    public async Task ClearAndSaveDiagnosesAsync()
+    /// <summary>
+    /// Reads and returns the text from "All Diagnoses" field, then clears the input area.
+    /// </summary>
+    /// <returns>The string value currently residing inside the diagnoses field.</returns>
+    public async Task<string> ClearAndSaveDiagnosesAsync()
     {
         var field = GetFieldByLabel("All Diagnoses");
-        AllDiagnises = await field.InputValueAsync(); // Save to class field
+        var savedDiagnoses = await field.InputValueAsync();
+
         await field.ClearAsync();
-        // NOTE: Review debug log
         Log.Debug("All Diagnoses cleared");
+
+        return savedDiagnoses;
     }
 
     /// <summary>

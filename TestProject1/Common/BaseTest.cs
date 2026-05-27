@@ -3,6 +3,7 @@ using Microsoft.Playwright;
 using Microsoft.Playwright.NUnit;
 using NUnit.Framework;
 using Serilog;
+using static System.Net.Mime.MediaTypeNames;
 
 namespace CareAdminTestProject.Common
 {
@@ -74,44 +75,80 @@ namespace CareAdminTestProject.Common
         [SetUp]
         public async Task BaseSetup()
         {
-            Log = Serilog.Log.ForContext("WorkerId", TestContext.CurrentContext.WorkerId);
+            Page.Response += (sender, response) =>
+            {
+                // Если статус ответа от сервера 400 или выше (ошибки)
+                if (response.Status >= 400)
+                {
+                    var apiError = $"[API ERROR {response.Status}] URL: {response.Url} | Method: {response.Request.Method}";
 
+                    Log.Error(apiError);
+
+                    // Складываем в специальный изолированный файл
+                    File.AppendAllText("failed_api_requests.log", $"[{DateTime.Now}] {apiError}{Environment.NewLine}");
+                }
+            };
+
+            Log = Serilog.Log.ForContext("WorkerId", TestContext.CurrentContext.WorkerId);
             Log.Information($"Initializing test context for Worker: {TestContext.CurrentContext.WorkerId}...");
 
-            await _authSemaphore.WaitAsync();
-            try
+            // 1. Пытаемся применить существующий state.json, если он есть
+            if (File.Exists(StatePath))
             {
-                if (!File.Exists(StatePath))
+                Log.Information($"[AUTH] State file found. Loading context state...");
+                try
                 {
-                    Log.Information($"[AUTH] state.json missing for Worker {TestContext.CurrentContext.WorkerId}. Triggering baseline authentication sequence...");
-                    await ExecuteAuthWithRetriesAsync("INITIAL AUTH");
+                    await RefreshTokenIfNeededInternal();
                 }
-
-                await RefreshTokenIfNeededInternal();
+                catch (Exception ex)
+                {
+                    Log.Warning($"[AUTH] Token refresh failed: {ex.Message}. Will attempt recovery on landing page.");
+                }
             }
-            finally
+            else
             {
-                _authSemaphore.Release();
+                Log.Information($"[AUTH] state.json missing. Triggering baseline auth...");
+                await ExecuteAuthWithRetriesAsync("INITIAL AUTH");
             }
 
+            // 2. Переходим на главную страницу
             Log.Information($"[NAVIGATE] Worker {TestContext.CurrentContext.WorkerId} navigating to home page...");
-            // Direct page viewport towards the target system landing pathway
             await Page.GotoAsync("/", new() { Timeout = 60000, WaitUntil = WaitUntilState.Commit });
 
-            Log.Information($"[NAVIGATE] Worker {TestContext.CurrentContext.WorkerId} waiting for application anchor elements...");
+            // 3. ПРОВЕРКА: Куда мы попали?
+            // Разделяем селекторы: один означает "мы внутри", второй — "нас выкинуло на форму логина"
+            var dashboardAnchor = Page.Locator("span.title:has-text('My Tasks')").First;
+            var loginFormAnchor = Page.Locator("button:has-text('SIGN IN'), input[placeholder='Username']").First;
+
+            Log.Information($"[NAVIGATE] Verifying page landing state...");
+
+            // Ждем появления хотя бы одного из этих признаков
+            await Page.Locator("span.title:has-text('My Tasks'), button:has-text('SIGN IN')").First.WaitForAsync(new() { Timeout = 15000 });
+
+            if (await loginFormAnchor.IsVisibleAsync())
+            {
+                Log.Warning($"[AUTH ALERT] Detached session detected! Worker was redirected to Sign In page. Executing emergency login sequence...");
+
+                // Перезапускаем полную процедуру авторизации через UI (ввод логина, пароля, сохранение state.json)
+                await ExecuteAuthWithRetriesAsync("EMERGENCY RE-AUTH");
+
+                // Снова переходим на главную страницу после генерации свежего состояния
+                await Page.GotoAsync("/", new() { Timeout = 30000, WaitUntil = WaitUntilState.Commit });
+            }
+
+            // 4. Окончательное подтверждение, что мы внутри системы
             try
             {
-                var rootAppAnchor = Page.Locator("input[placeholder='Username'], span.title:has-text('My Tasks')").First;
-                await rootAppAnchor.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 30000 });
-                Log.Information($"[NAVIGATE] Worker {TestContext.CurrentContext.WorkerId} successfully reached target landing state.");
+                await dashboardAnchor.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 15000 });
+                Log.Information($"[NAVIGATE SUCCESS] Worker {TestContext.CurrentContext.WorkerId} successfully reached target dashboard state.");
             }
             catch (Exception ex)
             {
-                Log.Error($"[NAVIGATE FAILED] Worker {TestContext.CurrentContext.WorkerId} stuck on empty screen. Current URL: {Page.Url}. Error: {ex.Message}");
+                Log.Error($"[NAVIGATE FAILED] Worker {TestContext.CurrentContext.WorkerId} stuck. Current URL: {Page.Url}. Error: {ex.Message}");
+                await Page.ScreenshotAsync(new() { Path = $"stuck_navigate_worker_{TestContext.CurrentContext.WorkerId}.png" });
                 throw;
             }
         }
-
         /// <summary>
         /// Evaluates current token expiration thresholds and updates the storage session state 
         /// if the file age exceeds the designated 4-minute boundary.

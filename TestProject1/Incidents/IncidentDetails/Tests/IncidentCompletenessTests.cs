@@ -72,7 +72,11 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
 
             await steps.FillGeneralTabAsync(data);
             await steps.SwitchToTab(tab);
-            await steps.ClearDetailsForm();
+            string diagnoses = await steps.ClearDetailsForm();
+            data = data with
+            {
+                Details = data.Details with { AllDiagnoses = diagnoses }
+            };
 
             await steps.VerifyRedDotTab(tab, true);
 
@@ -88,6 +92,10 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
             await steps.VerifyAllFieldsDotsStateAsync(steps.CreatePage.Details, data.Details, false);
         }
 
+
+
+
+
         /// <summary>
         /// Executes a progressive field-by-field verification loop on the Details tab via data dictionary maps, 
         /// confirming that individual form updates dynamically resolve specific input completeness requirements.
@@ -100,7 +108,11 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
 
             await steps.FillGeneralTabAsync(data);
             await steps.SwitchToTab(tab);
-            await steps.ClearDetailsForm();
+            string diagnoses = await steps.ClearDetailsForm();
+            data = data with
+            {
+                Details = data.Details with { AllDiagnoses = diagnoses }
+            };
 
             await steps.VerifyRedDotTab(tab, true);
 

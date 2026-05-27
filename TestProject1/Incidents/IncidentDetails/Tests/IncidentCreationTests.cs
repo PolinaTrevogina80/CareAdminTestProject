@@ -1,5 +1,6 @@
 ﻿using Microsoft.Playwright;
 using static CareAdminTestProject.Incidents.IncidentDetails.Pages.IncidentTabs.RNSupervisorTab;
+using static System.Runtime.InteropServices.JavaScript.JSType;
 
 namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
 {
@@ -296,6 +297,179 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
             await Page.GetByRole(AriaRole.Button, new() { Name = "Discard Changes" }).ClickAsync();
             await Page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
             await steps.ReloadPageAndNavigateAsync(draftUrl);
+        }
+
+        [Test]
+        [Description("Verify that deleting an incident transitions it to a read-only state with accurate deletion metadata.")]
+        public async Task Incident_Deletion_ShouldBecomeReadOnlyWithMetadata()
+        {
+            // 1. Создаем инцидент (минимальный валидный набор)
+            var minimalData = data with { General = data.General.GetOnlyRequiredFields() };
+            await steps.FillGeneralTabAsync(minimalData);
+            await steps.ClickCreateIncidentAsync();
+
+
+
+            string incidentUrl = await steps.GetCurrentUrlAsync();
+
+            // 2. Действие: Нажимаем кнопку Delete для самого инцидента
+            await steps.CreatePage.GetButtonByText("Delete Incident").ClickAsync();
+
+            // ВЗАИМОДЕЙСТВИЕ С ПОПАПОМ УДАЛЕНИЯ
+
+            // 1. Изолируем контейнер самого активного попапа
+            var popup = Page.Locator("div[role='dialog'], mat-dialog-container, dialog").First;
+            await Assertions.Expect(popup).ToBeVisibleAsync();
+
+            // 2. Ищем и кликаем на триггер выпадающего списка СТРОГО внутри этого попапа
+            var dropdownInPopup = popup.Locator(".mat-mdc-select-trigger, mat-select").First;
+            await dropdownInPopup.ClickAsync();
+
+            // Даем оверлею списка открыться
+            await Task.Delay(500);
+
+            // 3. Выбираем первую опцию (опции Angular выносятся за пределы попапа в корень cdk-overlay)
+            var reasonOption = Page.Locator("mat-mdc-option, mat-option, [role='option']").Nth(0);
+            await reasonOption.ClickAsync();
+
+            // Даем форме обновиться (Required field должно исчезнуть, кнопка OK стать активной)
+            await Task.Delay(300);
+
+            // 4. Кликаем по кнопке OK СТРОГО внутри этого попапа
+            var okButton = popup.Locator("button").Filter(new() { HasText = "OK" }).First;
+            await okButton.ClickAsync();
+
+            // Небольшая пауза после выбора опции
+            await Task.Delay(300);
+
+            // 3. Форсированно возвращаемся по URL удаленного инцидента
+            await steps.ReloadPageAndNavigateAsync(incidentUrl);
+
+            // 5. АССЕРТЫ: Проверка состояния формы (Read-Only) и меток удаления
+
+            // Проверяем, что поля формы заблокированы (Read-Only режим)
+            var firstInputField = Page.Locator("mat-select, input, textarea").First;
+            await Assertions.Expect(firstInputField).ToBeDisabledAsync();
+
+            // Проверяем метаданные удаления на странице
+            var deletedByLocator = Page.Locator("text=Deleted By:");
+            var deletedAtLocator = Page.Locator("text=Deleted At:");
+
+            await Assertions.Expect(deletedByLocator).ToBeVisibleAsync();
+            await Assertions.Expect(deletedAtLocator).ToBeVisibleAsync();
+
+            // Проверяем конкретный текст меток (как на вашем скриншоте)
+            await Assertions.Expect(Page.Locator("body")).ToContainTextAsync("Deleted By: Test, Polly");
+            await Assertions.Expect(Page.Locator("body")).ToContainTextAsync("Deleted At:");
+        }
+
+        [Test]
+        [Description("Verify that creating a duplicate incident for the same resident at the same time is blocked by the system validation.")]
+        public async Task Incident_DuplicateCreation_ShouldBeBlockedByValidationTable()
+        {
+            // Получаем точный индекс выбранного резидента
+            int savedResidentIndex = await steps.GetSelectedResidentIndexAsync();
+
+            // 1. Готовим данные для первого инцидента
+            var now = DateTime.Now;
+            var generatedTime = new TimeOnly(now.Hour, now.Minute);
+
+            // 1. Готовим данные для первого инцидента с динамическим временем
+            var incidentData = data with
+            {
+                General = data.General.GetOnlyRequiredFields() with
+                {
+                    time = generatedTime
+                }
+            };
+
+            // Заполняем первый инцидент (выбирается случайный резидент)
+            await steps.FillGeneralTabAsync(incidentData);
+
+
+            string addUrl = await steps.GetCurrentUrlAsync();
+
+            // Создаем первый инцидент
+            await steps.ClickCreateIncidentAsync();
+            await Task.Delay(1000);
+
+            // Возвращаемся на пустую форму создания
+            await steps.ReloadPageAndNavigateAsync(addUrl);
+
+            // 2. Заполняем второй инцидент для ТОГО ЖЕ резидента по сохраненному индексу
+            await steps.SelectResidentAsync(savedResidentIndex);
+            await steps.FillGeneralTabAsync(incidentData);
+            await steps.VerifyCreateButtonStateAsync(false);
+
+            // 3. АССЕРТЫ: Проверяем появление таблицы дубликатов на экране
+            var duplicatesPanel = Page.Locator("div.same-incidents-line");
+            await Assertions.Expect(duplicatesPanel).ToBeVisibleAsync();
+
+            var duplicateWarningText = duplicatesPanel.Locator("text=Duplicate date/time for resident");
+            await Assertions.Expect(duplicateWarningText).ToBeVisibleAsync();
+        }
+
+        /// <summary>
+        /// Verifies that entering a different time on the same date displays existing incidents in the daily panel without duplicate errors, allowing successful creation.
+        /// </summary>
+        [Test]
+        [Description("Verify that creating a second incident for the same resident on the same day but at a different time shows the history panel without duplicate errors and allows saving.")]
+        public async Task Incident_SameDayDifferentTime_ShouldShowPanelWithoutErrorsAndAllowCreation()
+        {
+            // 1. Генерируем базовое уникальное время для первого инцидента
+            var now = DateTime.Now;
+            var firstIncidentTime = new TimeOnly(now.Hour, now.Minute);
+
+            // Готовим данные для первого инцидента
+            var firstIncidentData = data with
+            {
+                General = data.General.GetOnlyRequiredFields() with
+                {
+                    time = firstIncidentTime
+                }
+            };
+
+            // Заполняем и сохраняем первый инцидент
+            await steps.FillGeneralTabAsync(firstIncidentData);
+            int savedResidentIndex = await steps.GetSelectedResidentIndexAsync();
+            string addUrl = await steps.GetCurrentUrlAsync();
+
+            await steps.ClickCreateIncidentAsync();
+            await Task.Delay(1000);
+
+            // 2. Готовим данные для второго инцидента (сдвигаем время на -2 часа вперед, чтобы избежать дубликата)
+            var secondIncidentTime = firstIncidentTime.AddHours(-2);
+            var secondIncidentData = data with
+            {
+                General = data.General.GetOnlyRequiredFields() with
+                {
+                    time = secondIncidentTime
+                }
+            };
+
+            // Возвращаемся на пустую форму создания
+            await steps.ReloadPageAndNavigateAsync(addUrl);
+
+            // Заполняем форму для ТОГО ЖЕ резидента, но с НОВЫМ временем
+            await steps.SelectResidentAsync(savedResidentIndex);
+            await steps.FillGeneralTabAsync(secondIncidentData);
+
+            // 3. АССЕРТЫ: Проверяем панель инцидентов за этот день
+            var incidentsPanel = Page.Locator("div.same-incidents-line");
+
+            // Панель должна быть на экране, так как у резидента уже есть инцидент в эти сутки
+            await Assertions.Expect(incidentsPanel).ToBeVisibleAsync();
+
+            // КРИТИЧЕСКИЙ АССЕРТ: Красного сообщения об ошибке времени быть НЕ должно
+            var duplicateWarningText = incidentsPanel.Locator("text=Duplicate date/time for resident");
+            await Assertions.Expect(duplicateWarningText).Not.ToBeVisibleAsync();
+
+            // Кнопка Create должна быть активна, так как время не пересекается
+            await steps.VerifyCreateButtonStateAsync(shouldBeEnabled: true);
+
+            // 4. ДЕЙСТВИЕ: Успешно сохраняем второй инцидент
+            await steps.ClickCreateIncidentAsync();
+            await Task.Delay(1000);
         }
     }
 }
