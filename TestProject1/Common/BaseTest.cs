@@ -3,6 +3,7 @@ using Microsoft.Playwright;
 using Microsoft.Playwright.NUnit;
 using NUnit.Framework;
 using Serilog;
+using System.Collections.Concurrent;
 using static System.Net.Mime.MediaTypeNames;
 
 namespace CareAdminTestProject.Common
@@ -75,20 +76,84 @@ namespace CareAdminTestProject.Common
         [SetUp]
         public async Task BaseSetup()
         {
+            // 1. Очередь для хранения истории последних 10 запросов (всех, включая успешные)
+            var requestHistory = new ConcurrentQueue<string>();
+            const int maxHistorySize = 10;
+
+            // 2. Очередь для хранения последних 10 логов консоли браузера
+            var consoleHistory = new ConcurrentQueue<string>();
+
+            // Подписка на ВСЕ ответы для ведения истории
             Page.Response += (sender, response) =>
             {
-                // Если статус ответа от сервера 400 или выше (ошибки)
+                var timestamp = DateTime.Now.ToString("dd.MM.yyyy HH:mm:ss");
+                var logLine = $"[{timestamp}] [{response.Status}] {response.Request.Method} -> {response.Url}";
+
+                requestHistory.Enqueue(logLine);
+                while (requestHistory.Count > maxHistorySize)
+                    requestHistory.TryDequeue(out _);
+
+                // Если это ошибка, обрабатываем её асинхронно, чтобы прочитать Body
                 if (response.Status >= 400)
                 {
-                    var apiError = $"[API ERROR {response.Status}] URL: {response.Url} | Method: {response.Request.Method}";
+                    Task.Run(async () =>
+                    {
+                        string responseBody = "Не удалось прочитать тело ответа";
+                        try
+                        {
+                            // Пытаемся получить текст ответа (обработает и plain text, и JSON)
+                            responseBody = await response.TextAsync();
 
-                    Log.Error(apiError);
+                            // Опционально: если ответ слишком длинный, можно его обрезать
+                            if (responseBody.Length > 2000)
+                                responseBody = responseBody.Substring(0, 2000) + "... [ОБРЕЗАНО]";
+                        }
+                        catch (Exception ex)
+                        {
+                            responseBody = $"[Ошибка чтения Body]: {ex.Message}";
+                        }
 
-                    // Складываем в специальный изолированный файл
-                    File.AppendAllText("failed_api_requests.log", $"[{DateTime.Now}] {apiError}{Environment.NewLine}");
+                        var errorTimestamp = DateTime.Now.ToString("dd.MM.yyyy HH:mm:ss");
+                        var errorBuilder = new System.Text.StringBuilder();
+
+                        errorBuilder.AppendLine($"==================================================");
+                        errorBuilder.AppendLine($"[❗ API ERROR {response.Status}] AT {errorTimestamp}");
+                        errorBuilder.AppendLine($"URL: {response.Url}");
+                        errorBuilder.AppendLine($"Method: {response.Request.Method}");
+                        errorBuilder.AppendLine($"==================================================");
+
+                        // Сюда вставляем полученный ответ сервера
+                        errorBuilder.AppendLine("--- ОТВЕТ СЕРВЕРА (RESPONSE BODY) ---");
+                        errorBuilder.AppendLine(string.IsNullOrWhiteSpace(responseBody) ? "(Пустое тело ответа)" : responseBody);
+                        errorBuilder.AppendLine("------------------------------------");
+
+                        errorBuilder.AppendLine("--- ПОСЛЕДНИЕ ЗАПРОСЫ (КОНТЕКСТ) ---");
+                        foreach (var hist in requestHistory) errorBuilder.AppendLine(hist);
+
+                        errorBuilder.AppendLine("--- ПОСЛЕДНИЕ ЛОГИ КОНСОЛИ БРАУЗЕРА ---");
+                        if (consoleHistory.IsEmpty) errorBuilder.AppendLine("(Консоль чиста)");
+                        else foreach (var conLog in consoleHistory) errorBuilder.AppendLine(conLog);
+
+                        errorBuilder.AppendLine($"==================================================\n");
+
+                        Log.Error($"API ERROR {response.Status}: {response.Url}");
+
+                        // Используем блокировку или потокобезопасный метод для записи в файл
+                        lock (requestHistory)
+                        {
+                            File.AppendAllText("failed_api_requests.log", errorBuilder.ToString());
+                        }
+                    });
                 }
             };
 
+            Page.Console += (sender, msg) =>
+            {
+                var timestamp = DateTime.Now.ToString("dd.MM.yyyy HH:mm:ss");
+                var consoleLine = $"[{timestamp}] [{msg.Type}] {msg.Text}";
+                consoleHistory.Enqueue(consoleLine);
+                while (consoleHistory.Count > maxHistorySize) consoleHistory.TryDequeue(out _);
+            };
             Log = Serilog.Log.ForContext("WorkerId", TestContext.CurrentContext.WorkerId);
             Log.Information($"Initializing test context for Worker: {TestContext.CurrentContext.WorkerId}...");
 

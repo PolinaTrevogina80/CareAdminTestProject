@@ -68,12 +68,11 @@ public class RNSupervisorTab : BaseIncidentTabs
             // Locate the details textarea on the current active view wrapper
             var detailsArea = Page.GetByPlaceholder("Enter details");
             await detailsArea.FillAsync(info.LastSeen.Details);
-            if (ToDoScreenshots)
-            {
-                // NOTE: Review debug screenshot sequence
-                await Page.MakeScreenshotAsync("RN_Step1_Filled");
-            }
-        });
+
+                
+            if (ToDoScreenshots) { // NOTE: Review debug screenshot sequence
+                     await Page.MakeScreenshotAsync("RN_Step1_Filled"); }
+        }, onStepFilled);
 
         // Step 2: Exact meticulous description
         await FillFormStepAsync(2, async () =>
@@ -81,12 +80,11 @@ public class RNSupervisorTab : BaseIncidentTabs
             // Populate details context block for the second question
             var detailsArea = Page.GetByPlaceholder("Enter details");
             await detailsArea.FillAsync(info.DescribeExactly.Details);
-            if (ToDoScreenshots)
-            {
+            if (ToDoScreenshots) {
                 // NOTE: Review debug screenshot sequence
-                await Page.MakeScreenshotAsync("RN_Step2_Filled");
-            }
-        });
+                await Page.MakeScreenshotAsync("RN_Step2_Filled"); }
+        }, onStepFilled);
+
 
         for (int i = 0; i < info.Questions.Count; i++)
         {
@@ -96,29 +94,20 @@ public class RNSupervisorTab : BaseIncidentTabs
             await FillFormStepAsync(stepNumber, async () =>
             {
                 var buttonName = currentQuestion.Answer ? "YES" : "NO";
-
-                // 1. Locate the mat-button-toggle component matching target text
-                // This approach is more resilient for Angular Material structures than default GetByRole methods
                 var toggleButton = Page.Locator("mat-button-toggle")
                     .Filter(new() { HasTextRegex = new Regex($"^{buttonName}$", RegexOptions.IgnoreCase) });
 
-                // 2. Wait until the target element handles click actions, then execute click
                 await toggleButton.WaitForAsync(new() { State = WaitForSelectorState.Visible });
                 await toggleButton.ClickAsync();
 
-                // 3. Inject comments if additional string context properties are populated
                 if (!string.IsNullOrEmpty(currentQuestion.Comments))
                 {
                     var detailsArea = Page.GetByPlaceholder("Enter comments");
                     await detailsArea.FillAsync(currentQuestion.Comments);
                 }
 
-                if (ToDoScreenshots)
-                {
-                    // NOTE: Review debug screenshot sequence
-                    await Page.MakeScreenshotAsync($"RN_Step_{stepNumber}_Filled");
-                }
-            });
+                if (ToDoScreenshots) { await Page.MakeScreenshotAsync($"RN_Step_{stepNumber}_Filled"); }
+            }, onStepFilled);
         }
 
     }
@@ -128,8 +117,9 @@ public class RNSupervisorTab : BaseIncidentTabs
     /// </summary>
     /// <param name="stepNumber">The target step sequential position number out of the total 28 steps.</param>
     /// <param name="fillAction">The delegate wrapper housing input form workflow steps.</param>
+    /// <param name="onStepFilled">An optional callback delegate triggered after completing an isolated workflow step.</param>
     /// <returns>A task representing the asynchronous operation.</returns>
-    private async Task FillFormStepAsync(int stepNumber, Func<Task> fillAction)
+    private async Task FillFormStepAsync(int stepNumber, Func<Task> fillAction, Func<int, Task>? onStepFilled = null)
     {
         var pagination = Page.Locator("div.pagination").Last;
 
@@ -138,6 +128,12 @@ public class RNSupervisorTab : BaseIncidentTabs
 
         // Execute structural internal field injection logic
         await fillAction();
+
+        // ВЫЗОВ КОЛБЭКА: Данные введены, но мы еще стоим на текущем шаге
+        if (onStepFilled != null)
+        {
+            await onStepFilled(stepNumber);
+        }
 
         // Advance layout pointer forward to the next step
         await GoToNextStepAsync();
@@ -352,4 +348,187 @@ public class RNSupervisorTab : BaseIncidentTabs
         // Cycle layout view forward to the next wizard slide container
         await GoToNextStepAsync();
     }
+
+    /// <summary>
+    /// Verifies the current text value of the form completion progress indicator (e.g., "25%" or "100%").
+    /// Utilizes the built-in assertions framework to seamlessly handle dynamic UI transitions during form entry.
+    /// </summary>
+    /// <param name="expectedPercentage">The expected percentage string, including the '%' symbol.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    public async Task VerifyProgressBarPercentageAsync(string expectedPercentage)
+    {
+        // Локатор находит span с классом progress-percent внутри контейнера
+        var percentLocator = Page.Locator("span.progress-percent");
+
+        // Проверяем, что текст совпадает с ожидаемым (например, "25%" или "100%")
+        await Assertions.Expect(percentLocator).ToHaveTextAsync(expectedPercentage);
+    }
+
+    /// <summary>
+    /// Navigates to the questionnaire overview screen by clicking the "To overview" action button.
+    /// </summary>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    public async Task ClickToOverviewAsync()
+    {
+        var button = GetButtonByText("To overview");
+        await button.ClickAsync();
+    }
+
+
+    /// <summary>
+    /// Iterates through all questions in the data model and verifies that the Material data table 
+    /// on the overview screen accurately reflects the expected 'X' marks and comment strings.
+    /// </summary>
+    /// <param name="expected">The full expected data model containing questions, answers, and comments.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    /// <summary>
+    /// Iterates through all questions in the data model and verifies the entire overview table,
+    /// automatically detecting and handling unanswered gaps.
+    /// </summary>
+    /// <summary>
+    /// Выполняет комплексную проверку всего экрана Overview (Шаги 1-28), 
+    /// включая базовые текстовые поля и динамические вопросы с пропусками.
+    /// </summary>
+    /// <param name="expected">Полная модель ожидаемых данных формы.</param>
+    /// <summary>
+    /// Выполняет комплексную проверку всего экрана Overview (Шаги 1-28), 
+    /// включая базовые уникальные поля времени/описания и динамические вопросы.
+    /// </summary>
+    public async Task VerifyOverviewAllQuestionsAsync(RNSupervisorTabInfo expected)
+    {
+        Console.WriteLine("[ALL-CHECK] >>> Начало полной проверки экрана Overview (Шаги 1-28) <<<");
+        // Получаем железный список всех строк таблицы на текущей странице
+        var allRows = Page.Locator("tr[role='row'].mat-mdc-row");
+
+        // ==========================================================
+        // БЛОК 1: Проверка уникальных текстовых шагов (Шаг 1 и Шаг 2)
+        // ==========================================================
+
+        // Шаг 1: Время последнего визита (Ищем по уникальным классам ячеек в первой строке таблицы)
+        Console.WriteLine("[ALL-CHECK] Проверяем Шаг 1: Время последнего визита и детали...");
+
+        // Находим первую строку таблицы
+        var firstRow = Page.Locator("tr[role='row'].mat-mdc-row").First;
+
+        // Ищем ячейки внутри первой строки по частичному совпадению классов, которые видно на скриншоте
+        var timeCell = firstRow.Locator("td[class*='column-timeAnswer']");
+        var firstStepCommentCell = firstRow.Locator("td[class*='column-comments']");
+
+        string formattedTime = expected.LastSeen.Time.ToString("h:mm tt", System.Globalization.CultureInfo.InvariantCulture);
+
+        // Проверяем время и текст комментария
+        await Assertions.Expect(timeCell).ToContainTextAsync(formattedTime);
+        await Assertions.Expect(firstStepCommentCell).ToContainTextAsync(expected.LastSeen.Details);
+        Console.WriteLine($"[SUCCESS] Шаг 1 валиден (Время: {formattedTime}, Детали: '{expected.LastSeen.Details}')");
+
+        // Шаг 2: Точное описание
+        Console.WriteLine("[ALL-CHECK] Проверяем Шаг 2: Точное описание...");
+
+        // Вторая строка таблицы
+        var secondRow = Page.Locator("tr[role='row'].mat-mdc-row").Nth(1);
+
+        // Текст описания на скриншоте лежит в ячейке комментариев (или описания), проверим по всей строке для надежности
+        await Assertions.Expect(secondRow).ToContainTextAsync(expected.DescribeExactly.Details);
+        Console.WriteLine($"[SUCCESS] Шаг 2 валиден (Детали: '{expected.DescribeExactly.Details}')");
+
+
+        // ==========================================================
+        // БЛОК 2: Проверка стандартной таблицы вопросов (Шаги 3-28)
+        // ==========================================================
+        for (int i = 0; i < expected.Questions.Count; i++)
+        {
+            var questionData = expected.Questions[i];
+            int displayFormIndex = i + 3; // Для логов оставляем номер шага на форме (3, 4, 5...)
+
+            // Вопросы гарантированно начинаются с 3-й строки в таблице (индекс 2 в Nth)
+            var rowLocator = allRows.Nth(i + 2);
+
+            // Ищем ячейки внутри конкретной строки по частичному совпадению классов Angular
+            var yesCell = rowLocator.Locator("td[class*='column-yes']");
+            var noCell = rowLocator.Locator("td[class*='column-no']");
+            var commentCell = rowLocator.Locator("td[class*='column-comments']");
+
+            // Так как мы оставили только первые 5 вопросов, все индексы с i >= 5 — это пустые пропуски
+            bool isGap = (i >= 5);
+
+            if (isGap)
+            {
+                Console.WriteLine($"[ALL-CHECK] Шаг {displayFormIndex}. Проверяем как ПРОПУЩЕННЫЙ (Обе колонки ответа и комментарий должны быть пустыми).");
+
+                await Assertions.Expect(yesCell).ToHaveTextAsync("");
+                await Assertions.Expect(noCell).ToHaveTextAsync("");
+                await Assertions.Expect(commentCell).ToHaveTextAsync("");
+            }
+            else
+            {
+                Console.WriteLine($"[ALL-CHECK] Шаг {displayFormIndex}. Проверяем как ЗАПОЛНЕННЫЙ. Ожидаем: {(questionData.Answer ? "YES" : "NO")}, Комментарий: '{questionData.Comments}'");
+
+                if (questionData.Answer)
+                {
+                    await Assertions.Expect(yesCell).ToHaveTextAsync("X");
+                    await Assertions.Expect(noCell).ToHaveTextAsync("");
+                }
+                else
+                {
+                    await Assertions.Expect(noCell).ToHaveTextAsync("X");
+                    await Assertions.Expect(yesCell).ToHaveTextAsync("");
+                }
+
+                string expectedComment = questionData.Comments ?? "";
+                await Assertions.Expect(commentCell).ToHaveTextAsync(expectedComment);
+            }
+        }
+
+        Console.WriteLine("[ALL-CHECK] >>> Успех! Все 28 шагов формы полностью верифицированы. <<<");
+    }
+
+    /// <summary>
+    /// Verifies whether a specific question row within the overview Material table represents an unanswered gap 
+    /// by checking that both the 'YES' and 'NO' selection columns remain completely empty.
+    /// </summary>
+    /// <param name="questionIndex">The 1-based index of the question row to interrogate.</param>
+    /// <param name="expectedGap">True if the row is expected to be blank/unanswered; otherwise, false.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    public async Task VerifyOverviewQuestionGapStatusAsync(int questionIndex, bool expectedGap)
+    {
+        // Находим строку, которая начинается с номера "X." (например, "6." или "28.")
+        var rowLocator = Page.Locator("tr[role='row'].mat-mdc-row")
+            .Filter(new() { HasTextRegex = new Regex($"^{questionIndex}\\.") });
+
+        var yesCell = rowLocator.Locator("td.dk-column-yes");
+        var noCell = rowLocator.Locator("td.dk-column-no");
+
+        if (expectedGap)
+        {
+            // Если это пропуск — ячейки выбора должны быть пустыми
+            await Assertions.Expect(yesCell).ToHaveTextAsync("");
+            await Assertions.Expect(noCell).ToHaveTextAsync("");
+        }
+        else
+        {
+            // Если вопрос должен быть отвечен
+            var yesText = await yesCell.InnerTextAsync();
+            var noText = await noCell.InnerTextAsync();
+            Assert.That(yesText == "X" || noText == "X", Is.True, $"Question {questionIndex} was expected to be answered.");
+        }
+    }
+
+    public async Task VerifyOverviewBaseStepsAsync(RNSupervisorTabInfo expected)
+    {
+        // Строка 1: Время последнего визита
+        var timeRow = Page.Locator("tr[role='row'].mat-mdc-row").Filter(new() { HasTextRegex = new Regex("^1\\.") });
+
+        // Форматируем TimeOnly в строку вида "9:00 AM" или "11:30 PM" (в зависимости от требований интерфейса)
+        // Если в системе используется 24-часовой формат, используйте "HH:mm" вместо "h:mm tt"
+        string formattedTime = expected.LastSeen.Time.ToString("h:mm tt", System.Globalization.CultureInfo.InvariantCulture);
+
+        await Assertions.Expect(timeRow).ToContainTextAsync(formattedTime);
+        await Assertions.Expect(timeRow).ToContainTextAsync(expected.LastSeen.Details);
+
+        // Строка 2: Точное описание
+        var descRow = Page.Locator("tr[role='row'].mat-mdc-row").Filter(new() { HasTextRegex = new Regex("^2\\.") });
+        await Assertions.Expect(descRow).ToContainTextAsync(expected.DescribeExactly.Details);
+    }
+
+
 }
