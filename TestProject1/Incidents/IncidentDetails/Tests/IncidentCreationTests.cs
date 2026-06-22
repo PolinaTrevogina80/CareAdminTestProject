@@ -274,12 +274,13 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
         public async Task EveryTab_WhenDataChanged_ShouldTriggerChangeDetectionOnMenuLeave(string tabName)
         {
             // --- STEP 1: POPULATE INITIAL MASTER REFERENCE DATASET ---
-            await steps.FillGeneralTabAsync(data);
-            await steps.FillDetailsTabAsync(data);
-            await steps.FillStateTabAsync(data);
-            await steps.FillMedicationTabAsync(data);
-            await steps.FillRNFormTabAsync(data);
-            await steps.FillSummaryTabAsync(data);
+            var minimalData = data with { General = data.General.GetOnlyRequiredFields() };
+            await steps.FillGeneralTabAsync(minimalData);
+            await steps.FillDetailsTabAsync(minimalData);
+            await steps.FillStateTabAsync(minimalData);
+            await steps.FillMedicationTabAsync(minimalData);
+            await steps.FillRNFormTabAsync(minimalData);
+            await steps.FillSummaryTabAsync(minimalData);
             await steps.ClickCreateIncidentAsync();
             await Task.Delay(1000);
             string draftUrl = await steps.GetCurrentUrlAsync();

@@ -60,7 +60,7 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Pages.IncidentTabs
         /// <summary>
         /// The Playwright page instance scoped to the current test context.
         /// </summary>
-        protected readonly IPage Page;
+        public readonly IPage Page;
 
         /// <summary>
         /// Specifies the authorized medical or administrative roles required to sign off on an incident.
@@ -373,6 +373,51 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Pages.IncidentTabs
         }
 
         /// <summary>
+        /// Вводит время вручную с клавиатуры в инпут времени.
+        /// </summary>
+        public async Task TypeTimeManuallyAsync(TimeOnly time)
+        {
+            // Находим сам kendo-timepicker по его имени и извлекаем внутренний инпут
+            var pickerContainer = Page.Locator($"kendo-timepicker[name='answerTime']");
+            var inputLocator = pickerContainer.Locator("input.k-input-inner").First;
+
+            await inputLocator.WaitForAsync(new() { State = WaitForSelectorState.Visible });
+
+            // Кликаем по инпуту и выделяем весь текст (Ctrl+A), чтобы стереть старое значение
+            await inputLocator.ClickAsync();
+            await Page.Keyboard.PressAsync("Control+A");
+            await Page.Keyboard.PressAsync("Delete");
+
+            // Форматируем время в строку без двоеточий, так как Kendo-маска сама расставит разделители
+            // Например, для 15:15 -> "0315PM", для 09:00 -> "0900AM"
+            string timeStringToType = time.ToString("hhmmtt", System.Globalization.CultureInfo.InvariantCulture);
+
+            Console.WriteLine($"[FILL] Вводим текст '{timeStringToType}' в Kendo TimePicker.");
+
+            // Эмулируем посимвольный ввод с клавиатуры
+            await Page.Keyboard.TypeAsync(timeStringToType);
+
+            // Нажимаем Tab, чтобы зафиксировать значение и убрать фокус
+            await Page.Keyboard.PressAsync("Tab");
+        }
+
+        /// <summary>
+        /// Проверяет текущее текстовое значение внутри инпута Kendo UI TimePicker.
+        /// </summary>
+        public async Task VerifyTimeFieldValueAsync(TimeOnly expectedTime)
+        {
+            var pickerContainer = Page.Locator($"kendo-timepicker[name='answerTime']");
+            var inputLocator = pickerContainer.Locator("input.k-input-inner").First;
+
+            // Kendo ожидает строку с разделителями, например "03:15 PM"
+            string expectedTimeString = expectedTime.ToString("hh:mm tt", System.Globalization.CultureInfo.InvariantCulture);
+
+            // Проверяем реальное value инпута
+            await Assertions.Expect(inputLocator).ToHaveValueAsync(expectedTimeString);
+            Console.WriteLine($"[FIELD-CHECK] Время в Kendo инпуте совпадает с ожидаемым: {expectedTimeString}");
+        }
+
+        /// <summary>
         /// Locates a specific time list column inside an active Kendo popup window picker and dispatches click event handlers onto target row string options using exact match patterns.
         /// </summary>
         /// <param name="popup">The locator context pointing to the visible active Kendo popup window component.</param>
@@ -584,12 +629,11 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Pages.IncidentTabs
                 // Process execution if target items match internal nested RichText editor frameworks for Evidence Reason configurations ("Explain reasoning...")
                 if (fieldName.Equals("Evidence Reason", StringComparison.OrdinalIgnoreCase))
                 {
-                    var reasonPattern = new Regex("reasoning", RegexOptions.IgnoreCase);
-
                     return Page.Locator("cad-incident-edit-summary")
                                .Locator("div.editor-wrapper")
-                               .Filter(new() { HasTextRegex = reasonPattern })
-                               .Locator("span.completeness-indicator");
+                               // Используем LocatorOptions для фильтрации по тексту внутри span
+                               .Filter(new() { Has = Page.Locator("span", new() { HasText = "Evidence Reason" }) })
+                               .Locator("span.completeness-indicator.reason");
                 }
             }
 

@@ -157,32 +157,27 @@ public class AttachmentsTab : BaseIncidentTabs
                 : categoryNames[categoryNames.Count - 1];
 
             // 3. Search and trigger click events at the material select field container level
-            var dropdown = dialog.Locator(".mat-mdc-select-value").First;
+            var dropdown = dialog.Locator(".mat-mdc-select-trigger").First;
             await dropdown.ScrollIntoViewIfNeededAsync();
             await dropdown.WaitForAsync(new() { State = WaitForSelectorState.Visible });
 
-            // NOTE: Review debug log
-            Log.Debug("Waiting 1.5 seconds to guarantee stable binding of Angular Event Listeners...");
-            await Page.WaitForTimeoutAsync(1500);
+            //// NOTE: Review debug log
+            //Log.Debug("Waiting 1.5 seconds to guarantee stable binding of Angular Event Listeners...");
+            //await Page.WaitForTimeoutAsync(1500);
 
             // NOTE: Review debug log
             Log.Debug("Focusing on select field and clicking...");
             await dropdown.FocusAsync();
-            await dropdown.ClickAsync(new() { Force = true });
+            await dropdown.ClickAsync();
 
             // 4. Target list option selection action
             // Implement a fallback button key trigger in case standard element clicking is ignored — dispatch Space key to trigger overlay expansions
             // NOTE: Review debug log
             Log.Debug("Verifying if option overlay wrapper expanded, if not — dispatching Space key sequence...");
             var overlay = Page.Locator(".cdk-overlay-container");
-            if (!await overlay.Locator("mat-option").First.IsVisibleAsync())
-            {
-                await Page.Keyboard.PressAsync("Space");
-            }
-
-            await Assertions.Expect(overlay).ToBeVisibleAsync();
-
             var option = overlay.Locator("mat-option").GetByText(currentCategory, new() { Exact = false });
+
+            await option.WaitForAsync(new() { State = WaitForSelectorState.Visible });
             await option.ClickAsync();
 
             // NOTE: Review debug log

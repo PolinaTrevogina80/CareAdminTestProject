@@ -1,5 +1,6 @@
 ﻿using CareAdminTestProject.Incidents.IncidentDetails.Pages.IncidentTabs;
 using Microsoft.Playwright;
+using static System.Net.Mime.MediaTypeNames;
 using Log = CareAdminTestProject.Common.TestLog;
 
 /// <summary>
@@ -71,9 +72,9 @@ public class GeneralTab : BaseIncidentTabs
             {
                 activity = "",       // Нет звездочки
                 summary = "",        // Нет звездочки
-                supervisor = 0,      // Нет звездочки
-                chargeNurse = 0,     // Нет звездочки
-                cna = 0              // Нет звездочки
+                supervisor = null,      // Нет звездочки
+                chargeNurse = null,     // Нет звездочки
+                cna = null              // Нет звездочки
             };
 
         }
@@ -326,18 +327,32 @@ public class GeneralTab : BaseIncidentTabs
             // In Kendo UI, the button can be either a button element or a span inside it. We use text.
             var todayBtn = popup.GetByRole(AriaRole.Button).Filter(new() { HasText = "Today" });
 
-            if (await todayBtn.CountAsync() > 0)
+            //if (await todayBtn.CountAsync() > 0)
+            //{
+            //    await todayBtn.First.ClickAsync(new() { Force = true });
+            //}
+            //else
+            //{
+            //    // Fallback option if it is not a Button by role
+            //    await popup.Locator(".k-calendar-nav-today, .k-nav-today").ClickAsync(new() { Force = true });
+            //}
+
+            // Перехватываем и ждем сетевой ответ от бэкенда при клике
+            await Page.RunAndWaitForResponseAsync(async () =>
             {
-                await todayBtn.First.ClickAsync(new() { Force = true });
-            }
-            else
-            {
-                // Fallback option if it is not a Button by role
-                await popup.Locator(".k-calendar-nav-today, .k-nav-today").ClickAsync(new() { Force = true });
-            }
+                if (await todayBtn.CountAsync() > 0)
+                {
+                    await todayBtn.First.ClickAsync(new() { Force = true });
+                }
+                else
+                {
+                    await popup.Locator(".k-calendar-nav-today, .k-nav-today").ClickAsync(new() { Force = true });
+                }
+            }, response => response.Url.Contains("responsible-employees") && response.Status == 200);
+
 
             // 4. Wait for closure
-            await popup.WaitForAsync(new() { State = WaitForSelectorState.Hidden });
+            await popup.WaitForAsync(new() { State = WaitForSelectorState.Hidden, Timeout = 1000 });
             // NOTE: Review debug log
             Log.Debug($"Date 'Today' is selected for the field {nameAttribute}");
         }
@@ -488,6 +503,5 @@ public class GeneralTab : BaseIncidentTabs
                 "CNA draft text mismatch!");
         }
     }
-
 
 }

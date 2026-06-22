@@ -87,7 +87,7 @@ public static class IncidentDataFactory
         int randomMinuteShift = random.Next(minShift, maxShift);
 
         // 5. Subtract the shift from the current time. The time is guaranteed to be unique, in the past, and within the current date!
-        var uniqueTime = new TimeOnly(edtNow.Hour, edtNow.Minute).Add(TimeSpan.FromMinutes(-randomMinuteShift));
+        var uniqueTime = new TimeOnly(edtNow.Hour, edtNow.Minute);// .Add(TimeSpan.FromMinutes(-randomMinuteShift));
 
 
         return new IncidentGeneralInfo(

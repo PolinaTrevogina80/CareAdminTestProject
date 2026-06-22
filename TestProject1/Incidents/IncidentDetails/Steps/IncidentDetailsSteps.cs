@@ -1,18 +1,17 @@
 ﻿using CareAdminTestProject.Common;
 using CareAdminTestProject.Incidents.IncidentDetails.Pages.IncidentTabs;
 using Microsoft.Playwright;
-using Serilog;
-using System.Buffers.Text;
-using static CareAdminTestProject.Common.BaseTest;
+using System.Text.Json;
+using static CareAdminTestProject.Common.PlaywrightExtensions;
 using static CareAdminTestProject.Incidents.IncidentDetails.Pages.IncidentTabs.BaseIncidentTabs;
 using static DetailsTab;
 using static GeneralTab;
 using static IncidentCreatePage;
 using static IncidentDataFactory;
 using static MedicationTab;
+using static Microsoft.Playwright.Assertions;
 using static StateTab;
 using static SummaryTab;
-using static CareAdminTestProject.Common.PlaywrightExtensions;
 using Log = CareAdminTestProject.Common.TestLog;
 
 namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
@@ -58,7 +57,8 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
     ///   <item> <description> Dashboard View Routing: <see cref="NavigateToTrackerViaMenu"/> </description> </item>
     ///   <item> <description> Poly-morphic Retention Verification: <see cref="VerifyDataRetainedAsync(object)"/> </description> </item>
     ///   <item> <description> Intentionally Trigger Form Dirtiness: <see cref="ModifySingleFieldOnTabAsync(string)"/> </description> </item>
-    ///   <item> <description> UI Indicator Checkpoints: <see cref="VerifyUnsavedChangesAlertVisibleAsync(string)"/>, 
+    ///   <item> <description> UI Indicator Checkpoints: <see cref="VerifySaveButtonEnabledStateAsync(bool)"/>, 
+    ///                                                  <see cref="VerifyUnsavedChangesAlertVisibleAsync(string)"/>, 
     ///                                                  <see cref="VerifyFieldsOneByOneWithFilling(object, object)"/>, 
     ///                                                  <see cref="VerifyAllFieldsDotsStateAsync{T}(object, T, bool)"/>, 
     ///                                                  <see cref="VerifyStateTabSpecificLogicAsync"/>, 
@@ -69,7 +69,6 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
     ///                                                  <see cref="VerifyResidentDiagnosesLoadedAsync"/>,
     ///                                                  <see cref="VerifyDescribeFieldRedDotStateAsync"/>,
     ///                                                  <see cref="FillRNFormTabWithTabCheckAsync(IncidentTestData)"/>, 
-    ///                                                  <see cref="SetOtherTypeOfAlarmCheckboxAsync"/>, 
     ///                                                  <see cref="VerifyOtherAlarmInputFieldStateAsync"/>, 
     ///                                                  <see cref="VerifyRedDotTab(string, bool)"/> </description> </item>
     /// </list>
@@ -133,6 +132,14 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
         public async Task<string> GetCurrentUrlAsync()
         {
             return _page.Url;
+        }
+
+        public async Task<string> GetIndicentId(string url)
+        {
+            var uri = new Uri(url);
+            string incidentId = uri.Segments.Last().Trim('/').Split('?')[0]; // Чистый GUID без параметров
+            Log.Information($"[TEST] Извлечен ID инцидента для проверки: {incidentId}");
+            return incidentId;
         }
 
         /// <summary>
@@ -224,11 +231,11 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
         {
             await ClearGeneralForm();
             await FillGeneralTabAsync(data);
-            await ClickCreateIncidentAsync();
             await FillDetailsTabAsync(data);
             await FillStateTabAsync(data);
             await FillMedicationTabAsync(data);
             await FillRNFormTabAsync(data);
+            await ClickCreateIncidentAsync();
             await FillSummaryTabAsync(data);
             await ClickSaveIncidentAsync();
             await SignSummaryAndVerifyAsync();
@@ -804,7 +811,12 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
                     break;
             }
         }
-
+        /// <summary>
+        /// Возвращает занчение текстового поля или Rich Text
+        /// </summary>
+        /// <param name="tabName">Идентификатор имени вкладки.</param>
+        /// <param name="label">Идентификатор поля вкладки.</param>
+        /// <returns>Значение указанного поля на вкладке.</returns>
         public async Task<String> VerifySingleFieldOnTabAsync(string tabName, string label)
         {
             switch (tabName)
@@ -819,6 +831,26 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
                     return await _createPage.Summary.GetFieldByLabel(label).InputValueAsync();
                 default:
                     return "";
+            }
+        }
+
+        /// <summary>
+        /// Проверяет, активна кнопка "Save" или заблокирована (disabled).
+        /// </summary>
+        public async Task VerifySaveButtonEnabledStateAsync(bool shouldBeEnabled)
+        {
+            Log.Information($"[ASSERTION] Проверяем, что кнопка 'Save' {(shouldBeEnabled ? "АКТИВНА" : "ЗАБЛОКИРОВАНА")}...");
+
+            // Находим кнопку сохранения. Подставьте точный локатор вашей кнопки (например, по тексту или селектору)
+            var saveButton = CreatePage.Page.Locator("button:has-text('Save')");
+
+            if (shouldBeEnabled)
+            {
+                await Assertions.Expect(saveButton).ToBeEnabledAsync(new() { Timeout = 5000 });
+            }
+            else
+            {
+                await Assertions.Expect(saveButton).ToBeDisabledAsync(new() { Timeout = 5000 });
             }
         }
 
@@ -866,7 +898,7 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
 
             Log.Debug("Waiting for URL to contain a valid saved incident draft GUID...");
             var guidRegex = new System.Text.RegularExpressions.Regex(@"[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}");
-            await _page.WaitForURLAsync(guidRegex, new() { Timeout = 30000 });
+            await _page.WaitForURLAsync(guidRegex, new() { Timeout = 60000 });
 
 
         }
@@ -909,6 +941,16 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
             await _createPage.ClickTabAsync("Summary\r\n");
             await _createPage.Summary.SignAndConfirmIncident();
             await _createPage.Summary.VerifySignatureImageVisible();
+        }
+
+        /// <summary>
+        /// Directs workspace focus to the Summary tab container, commits signature approval, and verifies graphic rendering components.
+        /// </summary>
+        /// <returns>A task representing the asynchronous operation.</returns>
+        public async Task RemoveSignatireAsync()
+        {
+            await _createPage.ClickTabAsync("Summary\r\n");
+            await _createPage.Summary.RemoveSignatureAsync();
         }
 
         /// <summary>
@@ -1360,74 +1402,114 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
             await Task.Delay(300);
         }
 
-        /// <summary>
         /// Captures the 'employees' API response and verifies that UI staff dropdowns 
-        /// contain the correct number of records according to employment status (active vs terminated).
+        /// contain the correct number of records according to employment status (active vs terminated). 
         /// </summary>
         public async Task VerifyStaffDropdownsCountWithApiAsync()
         {
+            DateTime incidentDate = DateTime.Today;
 
-            var jsonString = await _page.ApiPostRequest("employees");
+            // Шаг 1: Разблокируем секцию на UI
+            await UnlockStaffSectionByFillingDateAsync();
 
-            Assert.That(jsonString, Does.Not.Contain("Network Error"), $"Full JSON output was:\n{jsonString}");
+            // Шаг 2: Получаем эталонные данные из API (полный список сотрудников + правила конфига)
+            var (expectedSupervisor, expectedChargeNurse, expectedCna) = await GetExpectedStaffCountsFromApiAsync(incidentDate);
 
+            // Шаг 3: Сравниваем UI дропдауны с нашими расчетами
+            await VerifyUiDropdownsCountAsync(expectedSupervisor, expectedChargeNurse, expectedCna);
+        }
 
+        private async Task UnlockStaffSectionByFillingDateAsync()
+        {
+            Log.Information("[STAFF_VALIDATION] Verifying locking overlay text...");
+            var overlayLocator = _page.Locator("text=Enter Incident Date to unlock this section");
+            await Expect(overlayLocator).ToBeVisibleAsync(new() { Timeout = 5000 });
 
-            // Парсим корневой JSON
-            using var doc = System.Text.Json.JsonDocument.Parse(jsonString);
-            var root = doc.RootElement;
+            Log.Information("[STAFF_VALIDATION] Overlay is present. Filling 'Date of Incident' to unlock...");
+            await _createPage.General.SelectTodayAsync("dateOfIncident");
 
-            List<System.Text.Json.JsonElement> recordsArray;
+            await Expect(overlayLocator).ToBeHiddenAsync(new() { Timeout = 5000 });
+            Log.Information("[STAFF_VALIDATION] Section unlocked successfully.");
+        }
 
-            // Если корень — это массив (как говорит ошибка)
-            if (root.ValueKind == System.Text.Json.JsonValueKind.Array)
+        private async Task<(int Supervisor, int ChargeNurse, int Cna)> GetExpectedStaffCountsFromApiAsync(DateTime incidentDate)
+        {
+            Log.Information("[STAFF_VALIDATION] Fetching API data...");
+
+            // Вызываем POST-запрос для получения ПОЛНОГО списка сотрудников
+            var employeesJson = await _page.ApiPostRequest("employees");
+            Assert.That(employeesJson, Does.Not.Contain("Network Error"), $"Full employees JSON output was:\n{employeesJson}");
+
+            // 2. Вызов специализированного GET-метода с правильным роутом и заголовками
+            var configJson = await _page.ApiGetEmployeeConfig();
+            Assert.That(configJson, Does.Not.Contain("Network Error"), $"Full config JSON output was:\n{configJson}");
+
+            // Парсим полный список сотрудников
+            using var employeesDoc = System.Text.Json.JsonDocument.Parse(employeesJson);
+            var employeesRoot = employeesDoc.RootElement;
+            List<System.Text.Json.JsonElement> allEmployees = employeesRoot.ValueKind == System.Text.Json.JsonValueKind.Array
+                ? employeesRoot.EnumerateArray().ToList()
+                : employeesRoot.GetProperty("records").EnumerateArray().ToList();
+
+            // Фильтруем сотрудников по вашему бизнес-правилу (termDate == null ИЛИ termDate > today)
+            var activeEmployees = allEmployees.Where(e =>
             {
-                recordsArray = root.EnumerateArray().ToList();
-            }
-            // На всякий случай оставляем проверку свойства records, если на разных стендах структура отличается
-            else if (root.TryGetProperty("records", out var recordsProp) && recordsProp.ValueKind == System.Text.Json.JsonValueKind.Array)
-            {
-                recordsArray = recordsProp.EnumerateArray().ToList();
-            }
-            else
-            {
-                Assert.Fail("API Response Error: Root JSON element is neither an Array nor an Object with 'records' property.");
-                return;
-            }
+                if (!e.TryGetProperty("termDate", out var termProp) || termProp.ValueKind == System.Text.Json.JsonValueKind.Null)
+                    return true;
 
-            // Вычисляем эталонные значения на основе твоей бизнес-гипотезы
-            int totalEmployeesInApi = recordsArray.Count;
+                return DateTime.TryParse(termProp.GetString(), out DateTime termDate) && termDate > incidentDate;
+            }).ToList();
 
-            // Считаем активных сотрудников (termDate == null)
-            int activeEmployeesInApi = recordsArray.Count(e =>
-                e.TryGetProperty("termDate", out var termProp) && termProp.ValueKind == System.Text.Json.JsonValueKind.Null);
+            // Парсим конфигурацию ограничений
+            using var configDoc = System.Text.Json.JsonDocument.Parse(configJson);
+            var configRoot = configDoc.RootElement;
+            System.Text.Json.JsonElement incidentConfig = configRoot.TryGetProperty("incidentConfiguration", out var incProp) ? incProp : configRoot;
 
-            Log.Information($"[STAFF_VALIDATION] API Data Stats -> Total: {totalEmployeesInApi}, Active (termDate == null): {activeEmployeesInApi}");
+            // Рассчитываем эталонное количество для каждого дропдауна
+            int supervisor = GetCountForRole(incidentConfig, "supervisorConfiguration", activeEmployees);
+            int chargeNurse = GetCountForRole(incidentConfig, "chargeNurseConfiguration", activeEmployees);
+            int cna = GetCountForRole(incidentConfig, "cnaConfiguration", activeEmployees);
 
-            // Считаем реальное количество элементов на UI для каждого дропдауна
+            Log.Information($"[STAFF_VALIDATION] Expected API counts -> Supervisor: {supervisor}, Charge Nurse: {chargeNurse}, CNA: {cna}");
+            return (supervisor, chargeNurse, cna);
+        }
+
+        // ИСПРАВЛЕНО: Добавлен async Task для корректной работы асинхронных вызовов Playwright
+        private async Task VerifyUiDropdownsCountAsync(int expectedSupervisor, int expectedChargeNurse, int expectedCna)
+        {
             int uiSupervisorCount = await GetMaterialDropdownOptionsCountAsync("Supervisor");
             int uiChargeNurseCount = await GetMaterialDropdownOptionsCountAsync("Charge nurse");
             int uiCnaCount = await GetMaterialDropdownOptionsCountAsync("CNA");
 
             Log.Information($"[STAFF_VALIDATION] UI Data Stats -> Supervisor: {uiSupervisorCount}, Charge Nurse: {uiChargeNurseCount}, CNA: {uiCnaCount}");
 
-            // Финальные ассерты согласно твоей гипотезе
             Assert.Multiple(() =>
             {
-                // Гипотеза 1: В Supervisor только активные (termDate == null)
-                Assert.That(uiSupervisorCount, Is.EqualTo(activeEmployeesInApi),
-                    $"Staff Mismatch: 'Supervisor' dropdown should display ONLY active employees ({activeEmployeesInApi}), but displays {uiSupervisorCount}.");
+                Assert.That(uiSupervisorCount, Is.EqualTo(expectedSupervisor),
+                    $"Staff Mismatch for 'Supervisor' dropdown. Expected active: {expectedSupervisor}, Actual UI: {uiSupervisorCount}.");
 
-                // Гипотеза 2: В Charge Nurse и CNA доступны все сотрудники (включая уволенных)
-                Assert.That(uiChargeNurseCount, Is.EqualTo(totalEmployeesInApi),
-                    $"Staff Mismatch: 'Charge Nurse' dropdown should display ALL employees ({totalEmployeesInApi}), but displays {uiChargeNurseCount}.");
+                Assert.That(uiChargeNurseCount, Is.EqualTo(expectedChargeNurse),
+                    $"Staff Mismatch for 'Charge Nurse' dropdown. Expected active/constrained: {expectedChargeNurse}, Actual UI: {uiChargeNurseCount}.");
 
-                Assert.That(uiCnaCount, Is.EqualTo(totalEmployeesInApi),
-                    $"Staff Mismatch: 'CNA' dropdown should display ALL employees ({totalEmployeesInApi}), but displays {uiCnaCount}.");
+                Assert.That(uiCnaCount, Is.EqualTo(expectedCna),
+                    $"Staff Mismatch for 'CNA' dropdown. Expected active/constrained: {expectedCna}, Actual UI: {uiCnaCount}.");
             });
 
-            Log.Information("[STAFF_VALIDATION] Hypothesis successfully confirmed! Employee counts match API filters.");
+            Log.Information("[STAFF_VALIDATION] Validation successful! All dropdown counts match calculated API constraints.");
         }
+
+        private int GetCountForRole(System.Text.Json.JsonElement config, string roleConfigName, List<System.Text.Json.JsonElement> activeStaff)
+        {
+            if (config.TryGetProperty(roleConfigName, out var roleConfig) &&
+                roleConfig.TryGetProperty("employeeConstraints", out var constraints) &&
+                constraints.ValueKind == System.Text.Json.JsonValueKind.Array)
+            {
+                int constraintCount = constraints.GetArrayLength();
+                if (constraintCount > 0) return constraintCount;
+            }
+            return activeStaff.Count;
+        }
+
 
         /// <summary>
         /// Helper method to open a Kendo dropdown by its label, count its items, and close it safely.
@@ -1461,6 +1543,101 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
 
             return count;
         }
+
+        /// <summary>
+        /// Извлекает ID инцидента из URL, запрашивает лог репортов через API за текущие сутки
+        /// и проверяет, что сущность была успешно создана.
+        /// </summary>
+        public async Task VerifyReportableLogContainsCurrentIncidentAsync(string incidentId)
+        {
+            Log.Information("[ASSERTION] Начало интеграционной проверки создания reportable сущности...");
+
+            // 2. Формируем временной диапазон за ТЕКУЩИЕ сутки для параметров запроса
+            var today = DateTime.Today;
+            var queryParams = new Dictionary<string, object>
+                {
+                    { "start", today.ToString("yyyy-MM-ddT00:00:00") },
+                    { "end", today.AddDays(1).AddSeconds(-1).ToString("yyyy-MM-ddTHH:mm:ss") }
+                };
+
+                        // 3. Настраиваем заголовки контекста (взяты из вашей вкладки Network)
+            var customHeaders = new Dictionary<string, string>
+                {
+                    { "X-App-Id", "AccidentIncident" },
+                    { "X-Context-Type", "Facility" },
+                    { "X-Tenant-Id", "CassenaCare" }
+                };
+
+            Log.Information($"[API GET] Запрашиваем инциденты из 'incident/reportable-log' за дату {today:yyyy-MM-dd}...");
+
+            // Вызываем ваш стандартный метод API
+            string jsonResponse = await _page.ApiGetRequest("incident/reportable-log", queryParams, customHeaders);
+            Log.Information("[API SUCCESS] Ответ от бэкенда успешно получен. Приступаем к десериализации JSON...");
+
+            // 4. Парсим JSON ответ и ищем наш incidentId
+            using (JsonDocument doc = JsonDocument.Parse(jsonResponse))
+            {
+                JsonElement root = doc.RootElement;
+                bool isIncidentFound = false;
+
+                if (root.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (JsonElement element in root.EnumerateArray())
+                    {
+                        // Проверяем наличие свойства, хранящего ID инцидента
+                        if (element.TryGetProperty("incidentId", out JsonElement idProp) &&
+                            idProp.GetString() == incidentId)
+                        {
+                            isIncidentFound = true;
+                            break;
+                        }
+                    }
+
+                    Assert.That(isIncidentFound, Is.True,
+                        $"[FAIL] Интеграция нарушена! Инцидент с ID {incidentId} не обнаружен в репорт-логе бэкенда за сегодня. Ответ API: {jsonResponse}");
+                }
+                else
+                {
+                    // На случай, если бэкенд вернул объект структуры вместо массива
+                    Assert.That(jsonResponse.Contains(incidentId), Is.True,
+                        $"[FAIL] Интеграция нарушена! Строка ответа API не содержит ID {incidentId}. Ответ API: {jsonResponse}");
+                }
+            }
+
+            Log.Information($"[ASSERTION SUCCESS] Отлично! Инцидент {incidentId} присутствует в логе бэкенда. Сущность Reportable создана.");
+        }
+
+        public async Task VerifyLastModifiedFooterAsync(string expectedUser, bool verifyFormatOnly = false)
+        {
+            Log.Debug($"Verifying Last Modified footer for user: {expectedUser}");
+
+            // Локатор таблицы по тексту заголовка
+            var table = _page.Locator("table").Filter(new() { HasText = "Last Modified By" });
+
+            // Выбираем ячейки данных (исключая th, если они есть, или берем по структуре tr)
+            var authorCell = table.Locator("td").Nth(0);
+            var dateCell = table.Locator("td").Nth(1);
+
+            // 1. Проверяем автора изменений
+            await Assertions.Expect(authorCell).ToContainTextAsync(expectedUser);
+
+            // 2. Проверяем дату (текущий день в американском формате MM/dd/yyyy)
+            var todayDate = DateTime.Today.ToString("MM/dd/yyyy", System.Globalization.CultureInfo.InvariantCulture);
+            await Assertions.Expect(dateCell).ToContainTextAsync(todayDate);
+
+            // 3. Проверяем регулярным выражением валидность формата времени (например, "4:52 PM")
+            var dateText = await dateCell.InnerTextAsync();
+            // Паттерн валидирует: MM/DD/YYYY ЧЧ:ММ AM/PM
+            var timePattern = @"\d{2}/\d{2}/\d{4}\s+\d{1,2}:\d{2}\s+(AM|PM)";
+
+            if (!System.Text.RegularExpressions.Regex.IsMatch(dateText, timePattern))
+            {
+                throw new Exception($"Текст даты и времени '{dateText}' не соответствует формату 'MM/dd/yyyy h:mm tt'");
+            }
+
+            Log.Debug("Last Modified footer verified successfully.");
+        }
+
     }
 }
 

@@ -1,5 +1,5 @@
 ﻿using Microsoft.Playwright;
-using Serilog;
+using Log = CareAdminTestProject.Common.TestLog;
 
 /// <summary>
 /// Represents the Incident Tracker dashboard page.
@@ -26,22 +26,42 @@ public class IncidentTrackerPage
     {
         Log.Debug("[NAVIGATION] Checking for active loading overlays before clicking 'New Incident'...");
 
-        // 1. Сначала железно дожидаемся скрытия спиннера, если он крутится на экране
-        var loader = _page.Locator("kendo-loading, .k-loading-overlay, .k-i-loading, [class*='loading']").First;
-        try
+        // 1. Расширяем селектор реальным лоадером ".loader-wrapper", который виден в логах Playwright
+        // Иконка ромбика на скриншоте — это как раз элемент внутри этого контейнера
+        var loader = _page.Locator(".loader-wrapper, kendo-loading, .k-loading-overlay, .mat-mdc-progress-bar").First;
+
+        // Ждем пару мгновений (200-300мс), чтобы Angular успел вставить лоадер в DOM после перехода на страницу
+        await Task.Delay(300);
+
+        // Если лоадер появился на экране, железно ждем его гарантированного скрытия
+        if (await loader.IsVisibleAsync())
         {
-            await loader.WaitForAsync(new() { State = WaitForSelectorState.Hidden, Timeout = 5000 });
-            Log.Debug("[NAVIGATION] Loading spinner state is cleared.");
+            Log.Debug("[NAVIGATION] Active spinner detected. Waiting for it to disappear...");
+            try
+            {
+                // Ждем перехода элемента в состояние Hidden (исчезновение из DOM или invisible)
+                await loader.WaitForAsync(new() { State = WaitForSelectorState.Hidden, Timeout = 30000 });
+                Log.Debug("[NAVIGATION] Loading spinner state is cleared.");
+            }
+            catch (TimeoutException)
+            {
+                Log.Warning("[NAVIGATION] Spinner did not disappear within 30s, proceeding to action anyway.");
+            }
         }
-        catch (TimeoutException)
+        else
         {
-            Log.Debug("[NAVIGATION] Loading spinner was not present or disappeared instantly.");
+            Log.Debug("[NAVIGATION] No active loading spinner detected on page entry.");
         }
 
-        // 2. Теперь спокойно дожидаемся кнопку и кликаем по ней
+        // Дополнительная микро-пауза, чтобы анимация скрытия слоя полностью завершилась в браузере
+        await Task.Delay(200);
+
+        // 2. Теперь находим кнопку и кликаем по ней
         var newIncidentButton = _page.GetByRole(AriaRole.Button, new() { Name = "New Incident" });
 
-        await newIncidentButton.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 10000 });
+        await newIncidentButton.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 15000 });
+
+        Log.Debug("[NAVIGATION] Attempting to click 'New Incident' button...");
         await newIncidentButton.ClickAsync();
 
         Log.Debug("[NAVIGATION] 'New Incident' button clicked successfully.");

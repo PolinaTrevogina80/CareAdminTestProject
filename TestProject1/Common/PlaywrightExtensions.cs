@@ -72,6 +72,97 @@ namespace CareAdminTestProject.Common
             }
         }
 
+
+        public static async Task<string> ApiGetEmployeeConfig(this IPage page)
+        {
+            string token = "";
+            try
+            {
+                token = await GetTokenFromFile();
+
+                // Делаем GET-запрос, явно передавая правильный путь с /incident/ и контекстные заголовки
+                var apiResponse = await page.APIRequest.GetAsync("incident/employee-configuration", new()
+                {
+                    Headers = new Dictionary<string, string>
+            {
+                { "Authorization", token.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? token : $"Bearer {token}" },
+                { "Accept", "application/json" },
+                // Добавляем обязательный контекст, который требует этот эндпоинт
+                { "X-App-Id", "AccidentIncident" },
+                { "X-Context-Id", "c1f80483-fd30-4327-814e-778ad171a67b" }, // facilityId из вашего POST запроса
+                { "X-Context-Type", "Facility" },
+                { "X-Tenant-Id", "CassenaCare" }
+            }
+                });
+
+                if (!apiResponse.Ok)
+                {
+                    Assert.Fail($"API Error: Failed to fetch employee configuration. Status: {apiResponse.Status}, Text: {await apiResponse.TextAsync()}");
+                }
+
+                return await apiResponse.TextAsync();
+            }
+            catch (Exception ex)
+            {
+                return $"Network Error: Exception occurred while requesting employee configuration: {ex.Message}";
+            }
+        }
+        /// <summary>
+        /// Executes an authorized asynchronous HTTP GET request to retrieve available employee rosters.
+        /// Extracts a secure session bearer token and passes the operational facility context parameters.
+        /// Catch blocks safely encapsulate connection failures into structured fallback network error logs.
+        /// </summary>
+        /// <param name="page">The current Playwright page automation instance handling the execution context window.</param>
+        /// <param name="apiName">The specific descriptive alias matching the routing gateway layout.</param>
+        /// <returns>A string payload representing the response body or a safe formatted network exception text envelope.</returns>
+
+        public static async Task<string> ApiGetRequest(this IPage page, string endpoint, Dictionary<string, object>? queryParams = null, Dictionary<string, string>? customHeaders = null)
+        {
+            string token = "";
+            string rawContent = "";
+            try
+            {
+                token = await GetTokenFromFile();
+
+                var headers = new Dictionary<string, string>
+        {
+            { "Authorization", token.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? token : $"Bearer {token}" },
+            { "Accept", "application/json" }
+        };
+
+                // Если переданы кастомные заголовки (контекст, апп-ид), мержим их
+                if (customHeaders != null)
+                {
+                    foreach (var header in customHeaders)
+                    {
+                        headers[header.Key] = header.Value;
+                    }
+                }
+
+                var options = new APIRequestContextOptions { Headers = headers };
+
+                if (queryParams != null)
+                {
+                    options.Params = queryParams.ToDictionary(k => k.Key, v => v.Value);
+                }
+
+                var apiResponse = await page.APIRequest.GetAsync(endpoint, options);
+                rawContent = await apiResponse.TextAsync();
+
+                if (!apiResponse.Ok)
+                {
+                    Assert.Fail($"API Error: Failed to fetch data from {endpoint}. Status: {apiResponse.Status}, Content: {rawContent}");
+                }
+
+                return rawContent;
+            }
+            catch (Exception ex)
+            {
+                string snippet = rawContent.Length > 200 ? rawContent.Substring(0, 200) : rawContent;
+                return $"Network Error: Exception occurred while requesting {endpoint}: {ex.Message}. Raw content snippet: {snippet}";
+            }
+        }
+
         /// <summary>
         /// Extracts a valid authentication Bearer access token straight from the worker-isolated storage state environment file.
         /// Parses the underlying multi-origin localStorage schema layout tracking the explicit session key structures.

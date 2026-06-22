@@ -572,7 +572,8 @@ public class DetailsTab : BaseIncidentTabs
                 .Locator("input")
                 .InputValueAsync();
 
-            string expectedDateStr = expected.RelativeNotified.Date.ToString("M/d/yyyy", System.Globalization.CultureInfo.InvariantCulture);
+            // ЗАМЕНА: формат "MM/dd/yyyy" добавит ведущие нули (например, 06/09/2026 вместо 6/9/2026)
+            string expectedDateStr = expected.RelativeNotified.Date.ToString("MM/dd/yyyy", System.Globalization.CultureInfo.InvariantCulture);
             string expectedTimeStr = expected.RelativeNotified.Time.ToString("hh:mm tt", System.Globalization.CultureInfo.InvariantCulture);
 
             Assert.That(actualDateTime, Does.Contain(expectedDateStr), "Relative Notification Date mismatch");
@@ -612,7 +613,8 @@ public class DetailsTab : BaseIncidentTabs
                 .Locator("input")
                 .InputValueAsync();
 
-            string expectedDateStr = expected.MDNotified.Date.ToString("M/d/yyyy", System.Globalization.CultureInfo.InvariantCulture);
+            // ЗАМЕНА: формат "MM/dd/yyyy" для корректной проверки ведущих нулей
+            string expectedDateStr = expected.MDNotified.Date.ToString("MM/dd/yyyy", System.Globalization.CultureInfo.InvariantCulture);
             string expectedTimeStr = expected.MDNotified.Time.ToString("hh:mm tt", System.Globalization.CultureInfo.InvariantCulture);
 
             Assert.That(actualDateTime, Does.Contain(expectedDateStr), "MD Notification Date mismatch");

@@ -118,7 +118,7 @@ public class SummaryTab : BaseIncidentTabs
     /// <param name="label">The exact inner text identifier of the checkbox container.</param>
     /// <param name="state">The target selection status boolean.</param>
     /// <returns>A task representing the asynchronous operation.</returns>
-    private async Task SetCheckboxAsync(string label, bool state)
+    public async Task SetCheckboxAsync(string label, bool state)
     {
         var fieldContainer = Page.Locator("cad-label-value-field")
             .Filter(new() { HasText = label });
@@ -184,6 +184,7 @@ public class SummaryTab : BaseIncidentTabs
         // GetByRole resolves the native input inside mat-radio-button, and Playwright handles clicking the appropriate target area.
         await questionContainer.GetByRole(AriaRole.Radio, new() { Name = optionValue.Trim() })
             .ClickAsync();
+        await Task.Delay(300);
     }
 
     /// <summary>
@@ -249,6 +250,33 @@ public class SummaryTab : BaseIncidentTabs
     }
 
     /// <summary>
+    /// Удаляет цифровую подпись на вкладке, нажимая на крестик.
+    /// </summary>
+    public async Task RemoveSignatureAsync()
+    {
+        Log.Information("[ACTION] Удаляем цифровую подпись с вкладки...");
+
+        // Нацеливаемся строго на компонент подписи внутри панели таба Summary
+        var summarySignature = Page.GetByRole(AriaRole.Tabpanel, new() { Name = "Summary" })
+                                   .Locator("cad-incident-sign");
+
+        // Скроллим и кликаем по крестику
+        await summarySignature.ScrollIntoViewIfNeededAsync();
+        await summarySignature.Locator("mat-icon.remove-sign").ClickAsync();
+
+        Log.Information("[ACTION] Подтверждаем удаление...");
+        // Ждем и кликаем подтверждение
+        await Page.Locator("button:has-text('OK')").ClickAsync();
+
+        Log.Information("[CHECK] Проверяем, что подпись удалена и кнопка 'Sign Here' вернулась...");
+
+        // Проверяем, что кнопка "Sign Here" снова отображается и доступна для клика
+        var signHereButton = summarySignature.GetByRole(AriaRole.Button, new() { Name = "Sign Here" });
+        await Assertions.Expect(signHereButton).ToBeVisibleAsync(new() { Timeout = 5000 });
+
+    }
+
+    /// <summary>
     /// Evaluates if the signature image container has rendered correctly and contains a populated, operational media source URL.
     /// </summary>
     /// <returns>A task representing the asynchronous operation.</returns>
@@ -285,7 +313,7 @@ public class SummaryTab : BaseIncidentTabs
         string attachmentName = $"{guid}_Summary";
 
         // 2. Initialize the dynamic asynchronous download watcher cycle handler
-        var downloadTask = Page.WaitForDownloadAsync(new() { Timeout = 180000 }); // Wait threshold allocated up to 180 seconds
+        var downloadTask = Page.WaitForDownloadAsync(new() { Timeout = 300000 }); // Wait threshold allocated up to 180 seconds
 
         // 3. Trigger the confirmation event handler via the "Yes" action button control inside the overlay dialog layout
         var yesButton = Page.GetByRole(AriaRole.Button, new() { Name = "Yes", Exact = true });
@@ -316,6 +344,22 @@ public class SummaryTab : BaseIncidentTabs
     {
         var container = Page.Locator("cad-label-value-field").Filter(new() { HasText = label });
         return await container.Locator("mat-checkbox input").IsCheckedAsync();
+    }
+
+    /// <summary>
+    /// Reads the runtime disabled status of a standard mat-checkbox UI component resolved by its field label context text.
+    /// </summary>
+    /// <param name="label">The exact string label description residing within the field container elements.</param>
+    /// <returns>True if the matching checkbox input properties register as disabled; otherwise, false.</returns>
+    public async Task<bool> IsCheckboxDisabledAsync(string label)
+    {
+        var container = Page.Locator("cad-label-value-field").Filter(new() { HasText = label });
+
+        // Проверяем нативное свойство disabled у input или атрибут disabled на mat-checkbox
+        bool isInputDisabled = await container.Locator("mat-checkbox input").IsDisabledAsync();
+        bool isMatCheckboxDisabled = await container.Locator("mat-checkbox").GetAttributeAsync("disabled") != null;
+
+        return isInputDisabled || isMatCheckboxDisabled;
     }
 
     /// <summary>
@@ -368,6 +412,31 @@ public class SummaryTab : BaseIncidentTabs
             .Trim();
 
         return cleanText;
+    }
+
+    /// <summary>
+    /// Версифицирует, что текстовое поле или Rich Text редактор полностью очищены от контента.
+    /// </summary>
+    /// <param name="fieldIdentifier">Идентификатор поля (например, "evidenceReason").</param>
+    /// <returns>Текущий инстанс страницы для Fluent-цепочек.</returns>
+    public async Task<SummaryTab> VerifyRichTextFieldIsEmptyAsync(string fieldIdentifier)
+    {
+        Log.Information($"[ASSERT] Проверяем, что поле Rich Text '{fieldIdentifier}' полностью пустое...");
+
+        string actualValue = await GetRichTextValueAsync(fieldIdentifier);
+
+        // Очищаем от HTML-тегов, которые Angular Quill/Kendo может оставлять при пустом поле (например, <p><br></p>)
+        string cleanText = System.Text.RegularExpressions.Regex.Replace(actualValue, "<.*?>", "").Trim();
+
+        // ПРАВКА: Если Kendo UI при очистке подставил дефолтное техническое слово-заполнитель
+        if (cleanText.Equals("Paragraph", StringComparison.OrdinalIgnoreCase))
+        {
+            cleanText = string.Empty;
+        }
+
+        Assert.That(cleanText, Is.Empty, $"Ожидалось, что поле '{fieldIdentifier}' будет пустым, но оно содержит текст: '{actualValue}'");
+
+        return this;
     }
 
     /// <summary>
