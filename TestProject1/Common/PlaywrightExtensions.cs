@@ -40,73 +40,111 @@ namespace CareAdminTestProject.Common
         /// <param name="apiName">The specific descriptive alias matching the routing gateway layout.</param>
         /// <returns>A string payload representing the response body or a safe formatted network exception text envelope.</returns>
 
-        public static async Task<string> ApiPostRequest(this IPage page, string apiName)
+        public static async Task<string> ApiPostRequest(
+            this IPage page,
+            string relativeUrl,
+            object? requestBody = null,
+            Dictionary<string, string>? customHeaders = null)
         {
-
             string token = "";
+            string rawContent = "";
+            string fullUrl = "";
             try
             {
-                token = await GetTokenFromFile();
+                fullUrl = relativeUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase)
+                    ? relativeUrl
+                    : await GetFullURL(relativeUrl, page);
 
-                // Делаем POST-запрос, явно передавая заголовок Authorization
-                var apiResponse = await page.APIRequest.PostAsync("employees", new()
+                try
                 {
-                    DataObject = new { facilityId = "c1f80483-fd30-4327-814e-778ad171a67b" },
-                    Headers = new Dictionary<string, string>
+                    // Исправлено: если JS возвращает null, C# запишет пустую строку, а не null
+                    token = await page.EvaluateAsync<string>("() => localStorage.getItem('access_token') || sessionStorage.getItem('access_token') || ''");
+                }
+                catch (Exception)
+                {
+                    token = "";
+                }
+
+                // Если из браузера токен получить не удалось (вернулась пустая строка), берем из файла
+                if (string.IsNullOrEmpty(token))
+                {
+                    token = await GetTokenFromFile() ?? "";
+                }
+
+                // Если токен все еще пустой, подстрахуемся, чтобы не передать null в заголовок
+                if (string.IsNullOrEmpty(token))
+                {
+                    token = "NoTokenFound";
+                }
+
+                // Если токен достали без приставки Bearer, форматируем его
+                if (!token.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) && token != "NoTokenFound")
+                {
+                    token = $"Bearer {token}";
+                }
+
+                var currentUri = new Uri(page.Url);
+                string baseFrontendUrl = currentUri.GetLeftPart(UriPartial.Authority);
+
+                // Формируем словарь заголовков. Ни одно значение здесь теперь гарантированно не будет null
+                var headers = new Dictionary<string, string>
+                {
+                    { "Authorization", token },
+                    { "Accept", "application/json" },
+                    { "Content-Type", "application/json" }, // Возвращаем обязательный Content-Type
+                    { "X-App-Id", "AccidentIncident" },
+                    { "X-Context-Id", "c1f80483-fd30-4327-814e-778ad171a67b" },
+                    { "X-Context-Type", "Facility" },
+                    { "X-Tenant-Id", "CassenaCare" },
+                    { "Origin", baseFrontendUrl },
+                    { "Referer", baseFrontendUrl + "/" }
+                };
+
+                if (customHeaders != null)
+                {
+                    foreach (var header in customHeaders)
                     {
-                        { "Authorization", token.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? token : $"Bearer {token}" },
-                        { "Accept", "application/json" }
+                        // Дополнительная защита: игнорируем null/undefined из кастомных заголовков
+                        if (header.Value != null)
+                        {
+                            headers[header.Key] = header.Value;
+                        }
                     }
-                });
+                }
+
+                var options = new APIRequestContextOptions { Headers = headers };
+
+                if (requestBody != null)
+                {
+                    options.DataObject = requestBody;
+                }
+
+                var apiResponse = await page.APIRequest.PostAsync(fullUrl, options);
+                rawContent = await apiResponse.TextAsync();
 
                 if (!apiResponse.Ok)
                 {
-                    Assert.Fail($"API Error: Failed to fetch employees. Status: {apiResponse.Status}, Text: {await apiResponse.TextAsync()}");
+                    Assert.Fail($"API Error: Failed to POST data to {fullUrl}. Status: {apiResponse.Status}, Content: {rawContent}");
                 }
 
-                return await apiResponse.TextAsync();
+                if (rawContent.TrimStart().StartsWith("<"))
+                {
+                    string snippet = rawContent.Length > 500 ? rawContent.Substring(0, 500) : rawContent;
+                    Assert.Fail($"API Error: Expected JSON response from {fullUrl}, but received HTML instead. Snippet: {snippet}");
+                }
+
+                return rawContent;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!(ex is AssertionException))
             {
-                return($"Network Error: Exception occurred while requesting employee data: {ex.Message}");
+                string snippet = rawContent.Length > 200 ? rawContent.Substring(0, 200) : rawContent;
+                Log.Error($"Network Error: Exception occurred while POSTing to {fullUrl}: {ex.Message}. Raw content snippet: {snippet}");
+
+                throw;
             }
         }
 
 
-        public static async Task<string> ApiGetEmployeeConfig(this IPage page)
-        {
-            string token = "";
-            try
-            {
-                token = await GetTokenFromFile();
-
-                // Делаем GET-запрос, явно передавая правильный путь с /incident/ и контекстные заголовки
-                var apiResponse = await page.APIRequest.GetAsync("incident/employee-configuration", new()
-                {
-                    Headers = new Dictionary<string, string>
-            {
-                { "Authorization", token.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? token : $"Bearer {token}" },
-                { "Accept", "application/json" },
-                // Добавляем обязательный контекст, который требует этот эндпоинт
-                { "X-App-Id", "AccidentIncident" },
-                { "X-Context-Id", "c1f80483-fd30-4327-814e-778ad171a67b" }, // facilityId из вашего POST запроса
-                { "X-Context-Type", "Facility" },
-                { "X-Tenant-Id", "CassenaCare" }
-            }
-                });
-
-                if (!apiResponse.Ok)
-                {
-                    Assert.Fail($"API Error: Failed to fetch employee configuration. Status: {apiResponse.Status}, Text: {await apiResponse.TextAsync()}");
-                }
-
-                return await apiResponse.TextAsync();
-            }
-            catch (Exception ex)
-            {
-                return $"Network Error: Exception occurred while requesting employee configuration: {ex.Message}";
-            }
-        }
         /// <summary>
         /// Executes an authorized asynchronous HTTP GET request to retrieve available employee rosters.
         /// Extracts a secure session bearer token and passes the operational facility context parameters.
@@ -116,12 +154,17 @@ namespace CareAdminTestProject.Common
         /// <param name="apiName">The specific descriptive alias matching the routing gateway layout.</param>
         /// <returns>A string payload representing the response body or a safe formatted network exception text envelope.</returns>
 
-        public static async Task<string> ApiGetRequest(this IPage page, string endpoint, Dictionary<string, object>? queryParams = null, Dictionary<string, string>? customHeaders = null)
+        public static async Task<string> ApiGetRequest(this IPage page, string relativeUrl, Dictionary<string, object>? queryParams = null, Dictionary<string, string>? customHeaders = null)
         {
             string token = "";
             string rawContent = "";
             try
             {
+                // 1. Формируем полный URL (если передан относительный путь/хвост)
+                string fullUrl = relativeUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase)
+                    ? relativeUrl
+                    : await GetFullURL(relativeUrl, page);
+
                 token = await GetTokenFromFile();
 
                 var headers = new Dictionary<string, string>
@@ -130,7 +173,6 @@ namespace CareAdminTestProject.Common
             { "Accept", "application/json" }
         };
 
-                // Если переданы кастомные заголовки (контекст, апп-ид), мержим их
                 if (customHeaders != null)
                 {
                     foreach (var header in customHeaders)
@@ -146,23 +188,34 @@ namespace CareAdminTestProject.Common
                     options.Params = queryParams.ToDictionary(k => k.Key, v => v.Value);
                 }
 
-                var apiResponse = await page.APIRequest.GetAsync(endpoint, options);
+                // 2. ИССПРАВЛЕНО: Теперь отправляем запрос именно на сформированный fullUrl
+                var apiResponse = await page.APIRequest.GetAsync(fullUrl, options);
                 rawContent = await apiResponse.TextAsync();
 
+                // 3. ИСПРАВЛЕНО: В логи ошибок пишем fullUrl для точной диагностики
                 if (!apiResponse.Ok)
                 {
-                    Assert.Fail($"API Error: Failed to fetch data from {endpoint}. Status: {apiResponse.Status}, Content: {rawContent}");
+                    Assert.Fail($"API Error: Failed to fetch data from {fullUrl}. Status: {apiResponse.Status}, Content: {rawContent}");
+                }
+
+                // Проверяем на случай, если сервер вернул 200 OK, но внутри HTML (например, страница логина IIS/Nginx)
+                if (rawContent.TrimStart().StartsWith("<"))
+                {
+                    string snippet = rawContent.Length > 500 ? rawContent.Substring(0, 500) : rawContent;
+                    Assert.Fail($"API Error: Expected JSON from {fullUrl}, but received HTML instead. Snippet: {snippet}");
                 }
 
                 return rawContent;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!(ex is AssertionException))
             {
+                // 4. ИСПРАВЛЕНО: В лог перехвата исключений пишем fullUrl
                 string snippet = rawContent.Length > 200 ? rawContent.Substring(0, 200) : rawContent;
-                return $"Network Error: Exception occurred while requesting {endpoint}: {ex.Message}. Raw content snippet: {snippet}";
+                Log.Error($"Network Error: Exception occurred while requesting {relativeUrl} (Full URL: {relativeUrl}): {ex.Message}. Raw content snippet: {snippet}");
+
+                throw; // Критично: пробрасываем ошибку вверх, чтобы тест упал с понятным логом
             }
         }
-
         /// <summary>
         /// Extracts a valid authentication Bearer access token straight from the worker-isolated storage state environment file.
         /// Parses the underlying multi-origin localStorage schema layout tracking the explicit session key structures.
@@ -226,6 +279,43 @@ namespace CareAdminTestProject.Common
 
             Log.Debug("[STAFF_VALIDATION] Token extracted successfully. Executing authorized POST request...");
             return token;
+        }
+
+        public static async Task<String> GetFullURL(String method, IPage _page)
+        {
+            // 1. Динамически получаем базовый URL текущего стенда (локального или серверного)
+            var currentUri = new Uri(_page.Url);
+            string fullApiUrl;
+            string cleanMethod = method.StartsWith("/") ? method.Substring(1) : method;
+
+            // 2. Проверяем, локальный ли это запуск (localhost или 127.0.0.1)
+            if (currentUri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
+                currentUri.Host.Equals("127.0.0.1"))
+            {
+                // ИСПРАВЛЕНО: Для локального запуска жестко прописываем порт бэкенда 60254
+                // вместо порта фронтенда (4200), который открыт в браузере
+                string localApiPort = ":60254";
+                fullApiUrl = $"https://{currentUri.Host}{localApiPort}/{cleanMethod}";
+            }
+            else
+            {
+                // 3. Если серверный стенд — извлекаем окружение (qa, stg, dev и т.д.) из хоста страницы
+                // Например: из "qa.careadminplus.com" получаем первое слово до точки — "qa"
+                string environment = currentUri.Host.Split('.')[0].ToLower();
+
+                // На случай, если в URL страницы вообще нет поддомена (просто careadminplus.com), ставим дефолт "qa"
+                if (environment == "careadminplus" || string.IsNullOrEmpty(environment))
+                {
+                    environment = "qa";
+                }
+
+                // 4. Собираем целевой URL к Azure API с динамической подстановкой окружения
+                fullApiUrl = $"https://cad-api-eu-{environment}.azurewebsites.net/{method}";
+            }
+
+            // Logging для отладки в консоли тестов
+            Log.Information($"[API GET] Сформирован целевой URL: {fullApiUrl}");
+            return fullApiUrl;
         }
     }
 

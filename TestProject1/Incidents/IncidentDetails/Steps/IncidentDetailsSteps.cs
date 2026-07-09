@@ -1,6 +1,10 @@
 ﻿using CareAdminTestProject.Common;
+using CareAdminTestProject.Incidents.Helpers;
 using CareAdminTestProject.Incidents.IncidentDetails.Pages.IncidentTabs;
 using Microsoft.Playwright;
+using Microsoft.Testing.Platform.Configurations;
+using UglyToad.PdfPig;
+using System.Reflection.PortableExecutable;
 using System.Text.Json;
 using static CareAdminTestProject.Common.PlaywrightExtensions;
 using static CareAdminTestProject.Incidents.IncidentDetails.Pages.IncidentTabs.BaseIncidentTabs;
@@ -1436,12 +1440,28 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
         {
             Log.Information("[STAFF_VALIDATION] Fetching API data...");
 
-            // Вызываем POST-запрос для получения ПОЛНОГО списка сотрудников
-            var employeesJson = await _page.ApiPostRequest("employees");
+            // === 1. ПОЛУЧЕНИЕ СПИСКА СОТРУДНИКОВ (POST) ===
+            var payload = new { facilityId = "c1f80483-fd30-4327-814e-778ad171a67b" };
+
+            // Вызываем обновленный POST-метод
+            string employeesJson = await _page.ApiPostRequest("employees", payload);
+
             Assert.That(employeesJson, Does.Not.Contain("Network Error"), $"Full employees JSON output was:\n{employeesJson}");
 
-            // 2. Вызов специализированного GET-метода с правильным роутом и заголовками
-            var configJson = await _page.ApiGetEmployeeConfig();
+
+            // === 2. ПОЛУЧЕНИЕ КОНФИГУРАЦИИ (GET) ===
+            // Выносим специфические заголовки
+            var contextHeaders = new Dictionary<string, string>
+                {
+                    { "X-App-Id", "AccidentIncident" },
+                    { "X-Context-Id", "c1f80483-fd30-4327-814e-778ad171a67b" },
+                    { "X-Context-Type", "Facility" },
+                    { "X-Tenant-Id", "CassenaCare" }
+                };
+
+            // Вызываем наш универсальный GET
+            string configJson = await _page.ApiGetRequest("incident/employee-configuration", customHeaders: contextHeaders);
+
             Assert.That(configJson, Does.Not.Contain("Network Error"), $"Full config JSON output was:\n{configJson}");
 
             // Парсим полный список сотрудников
@@ -1570,7 +1590,7 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
 
             Log.Information($"[API GET] Запрашиваем инциденты из 'incident/reportable-log' за дату {today:yyyy-MM-dd}...");
 
-            // Вызываем ваш стандартный метод API
+            // 5. Вызываем ваш метод запроса
             string jsonResponse = await _page.ApiGetRequest("incident/reportable-log", queryParams, customHeaders);
             Log.Information("[API SUCCESS] Ответ от бэкенда успешно получен. Приступаем к десериализации JSON...");
 
@@ -1638,6 +1658,201 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
             Log.Debug("Last Modified footer verified successfully.");
         }
 
+        /// <summary>
+        /// Step: Verifies that both the tab counter and the actual grid table row count match the expected value.
+        /// </summary>
+        public async Task VerifyAttachmentsCounterAndTableRowsAsync(int expectedCount)
+        {
+            Log.Debug($"Шаг: Проверка того, что счетчик вкладки и строки таблицы равны: {expectedCount}");
+
+            // 1. Получаем значение счетчика из заголовка вкладки через POM
+            int actualTabCounter = await CreatePage.Attachments.GetTabCounterValueAsync();
+
+            // 2. Получаем количество фактических строк в таблице через POM
+            int actualTableRows = await CreatePage.Attachments.GetVisibleAttachmentsCountAsync();
+
+            // 3. Выполняем проверки в слое шагов (Синтаксис NUnit)
+            Assert.That(actualTabCounter, Is.EqualTo(expectedCount),
+                $"Счетчик на вкладке Attachments ({actualTabCounter}) не совпадает с ожидаемым ({expectedCount})!");
+
+            Assert.That(actualTableRows, Is.EqualTo(expectedCount),
+                $"Количество строк в таблице ({actualTableRows}) не совпадает с ожидаемым ({expectedCount})!");
+        }
+
+        public async Task VerifyAttachmentRowIsDisplayedAsync(string category)
+        {
+            Log.Debug($"Шаг: Верификация отображения строки с категорией '{category}' в таблице.");
+            // Просто перенаправляем вызов в ваш готовый метод из POM
+            await CreatePage.Attachments.VerifyAttachmentIsDisplayedAsync(category);
+        }
+
+        /// <summary>
+        /// Step: Dynamically updates the completion configuration for a specific tab/section via API.
+        /// </summary>
+        /// <param name="sectionCode">The target completion code (e.g., "Attachments", "General").</param>
+        /// <param name="isEnabled">Optional status flag to enable or disable the section.</param>
+        /// <param name="attachmentCount">Optional threshold configuration for files count validation.</param>
+        public async Task UpdateIncidentConfigurationAsync(string sectionCode, bool? isEnabled = null, int? attachmentCount = null)
+        {
+            Log.Debug($"Шаг: Изменение конфигурации для секции '{sectionCode}'. Enabled: {isEnabled}, Count: {attachmentCount}");
+
+            // Просто передаем чистый хвост эндпоинта!
+            string configRoute = "incident/completion-configuration";
+
+            // 1. Получаем текущую конфигурацию (URL соберется сам внутри ApiGetRequest)
+            var contextHeaders = new Dictionary<string, string>
+                {
+                    { "X-App-Id", "AccidentIncident" },
+                    { "X-Context-Id", "c1f80483-fd30-4327-814e-778ad171a67b" },
+                    { "X-Context-Type", "Facility" },
+                    { "X-Tenant-Id", "CassenaCare" }
+                };
+
+            string rawJsonGet = await CreatePage.Page.ApiGetRequest(configRoute, customHeaders: contextHeaders);
+
+            var configData = JsonSerializer.Deserialize<CompletionConfigResponse>(rawJsonGet);
+            Assert.That(configData, Is.Not.Null, "Не удалось десериализовать JSON конфигурации.");
+
+            // 2. Находим нужную секцию
+            var targetSection = configData.CompletionConfigurations
+                .FirstOrDefault(c => c.CompletionCode.Equals(sectionCode, StringComparison.OrdinalIgnoreCase));
+
+            Assert.That(targetSection, Is.Not.Null, $"Секция '{sectionCode}' не найдена в конфигурации бэкенда!");
+
+            // 3. Меняем параметры
+            if (isEnabled.HasValue) targetSection.Enabled = isEnabled.Value;
+            if (attachmentCount.HasValue) targetSection.AttachmentCount = attachmentCount.Value;
+
+            // 4. Отправляем обратно измененный объект (ApiPostRequest сам сделает из "incident/completion-configuration" полный URL)
+            await CreatePage.Page.ApiPostRequest(configRoute, configData);
+
+            Log.Information($"Конфигурация секции '{sectionCode}' успешно обновлена.");
+        }
+
+
+        public async Task DeleteAttachmentRowAsync(string category)
+        {
+            Log.Debug($"Шаг: Удаление строки аттача с категорией '{category}'");
+
+            // Вызываем метод из POM, который кликает "корзину" и подтверждает удаление в модалке
+            await CreatePage.Attachments.DeleteAttachmentByCategoryAsync(category);
+        }
+
+        /// <summary>
+        /// Step: Downloads an attachment by category, saves it to the temporary OS folder, 
+        /// and returns the absolute local path to the downloaded file.
+        /// </summary>
+        public async Task<string> DownloadAttachmentToTempFolderAsync(string category)
+        {
+            Log.Debug($"Шаг: Скачивание файла для категории '{category}' во временную папку.");
+
+            // СПРЯТАЛИ СЮДА: Теперь тест не знает про InitiateAttachmentDownloadAsync
+            var download = await CreatePage.Attachments.InitiateAttachmentDownloadAsync(category);
+
+            // Проверяем, что скачивание прошло успешно
+            string? failure = await download.FailureAsync();
+            Assert.That(failure, Is.Null, $"Скачивание файла завершилось ошибкой Playwright: {failure}");
+
+            // Формируем уникальный путь во временной директории ОС
+            string tempFilePath = Path.Combine(Path.GetTempPath(), download.SuggestedFilename);
+
+            // Физически сохраняем файл на диск
+            await download.SaveAsAsync(tempFilePath);
+            Log.Debug($"[STEPS] Файл успешно сохранен локально: {tempFilePath}");
+
+            return tempFilePath;
+        }
+
+        /// <summary>
+        /// Step: Opens a locally downloaded PDF file and returns its total number of pages.
+        /// </summary>
+        public int GetPdfPageCount(string localFilePath)
+        {
+            Log.Debug($"Шаг: Подсчет количества страниц в локальном файле: {localFilePath}");
+
+            if (!File.Exists(localFilePath))
+            {
+                throw new FileNotFoundException($"Скачанный файл не найден на диске по пути: {localFilePath}");
+            }
+
+            // Открываем документ с помощью библиотеки PdfPig и считываем свойство PageCount
+            using (PdfDocument document = PdfDocument.Open(localFilePath))
+            {
+                int pageCount = document.NumberOfPages;
+                Log.Information($"[STEPS] Внутри PDF документа обнаружено страниц: {pageCount}");
+                return pageCount;
+            }
+        }
+
+
+        public async Task EditAttachmentCategoryAsync(string currentCategory, string newCategory)
+        {
+            Log.Debug($"Шаг: Изменение категории аттача с '{currentCategory}' на '{newCategory}'");
+            await CreatePage.Attachments.ChangeAttachmentCategoryInRowAsync(currentCategory, newCategory);
+        }
+
+        public async Task DownloadAndVerifyAttachmentMaskAsync(string category)
+        {
+            Log.Debug($"Шаг: Скачивание файла для категории '{category}' и валидация маски имени.");
+
+            // 1. Получаем MRN для проверки маски
+            string mrn = await CreatePage.Attachments.GetResidentMrnAsync();
+
+            // 2. Скачиваем файл через POM
+            var download = await CreatePage.Attachments.InitiateAttachmentDownloadAsync(category);
+
+            // 3. Проверяем, что скачивание прошло успешно
+            string? failure = await download.FailureAsync();
+            Assert.That(failure, Is.Null, $"Скачивание файла завершилось ошибкой: {failure}");
+
+            // 4. Валидируем маску имени файла {MRN}_{Category}_{Date}.pdf
+            string suggestedFileName = download.SuggestedFilename;
+            Log.Information($"[DOWNLOAD VAL] Анализ имени файла: '{suggestedFileName}'");
+
+            // ИСПРАВЛЕНО: Для имени файла НЕ заменяем пробелы на подчёркивания!
+            // Заменяем только специфическое длинное тире, если оно есть
+            string formattedCategory = category.Replace("–", "-");
+
+            // Формируем точный префикс (например, "121698_Witness Statement_")
+            string expectedPrefix = mrn.Trim() + "_" + formattedCategory + "_";
+
+            // Сегодняшняя дата (2026-06-29)
+            string expectedDate = DateTime.Today.ToString("yyyy-MM-dd");
+
+            Log.Debug($"[DOWNLOAD VAL] Ожидаемый префикс: '{expectedPrefix}', Ожидаемая дата: '{expectedDate}'");
+
+            bool startsWithValidData = suggestedFileName.StartsWith(expectedPrefix, StringComparison.OrdinalIgnoreCase);
+            bool containsCurrentDate = suggestedFileName.Contains(expectedDate);
+            bool endsWithPdf = suggestedFileName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(startsWithValidData, Is.True,
+                    $"Имя файла '{suggestedFileName}' должно начинаться с префикса '{expectedPrefix}'");
+
+                Assert.That(containsCurrentDate, Is.True,
+                    $"Имя файла '{suggestedFileName}' должно содержать текущую дату '{expectedDate}'");
+
+                Assert.That(endsWithPdf, Is.True,
+                    $"Имя файла '{suggestedFileName}' должно иметь расширение '.pdf'");
+            });
+
+            Log.Information($"[DOWNLOAD SUCCESS] Тест скачивания успешно пройден!");
+        }
+
+        /// <summary>
+        /// Step: Verifies that the row dropdown displays the expected updated category name.
+        /// </summary>
+        public async Task VerifyRowSelectedCategoryAsync(string initialCategory, string expectedCategory)
+        {
+            Log.Debug($"Шаг: Проверка того, что в строке со старой категорией '{initialCategory}' теперь выбрана новая категория '{expectedCategory}'");
+
+            // Передаем в POM старую категорию для поиска строки
+            string actualCategory = await CreatePage.Attachments.GetSelectedCategoryFromRowAsync(initialCategory);
+
+            Assert.That(actualCategory, Is.EqualTo(expectedCategory),
+                $"В дропдауне строки со старой категорией '{initialCategory}' отображается некорректное значение!");
+        }
     }
 }
 

@@ -250,11 +250,14 @@ public class SummaryTab : BaseIncidentTabs
     }
 
     /// <summary>
-    /// Удаляет цифровую подпись на вкладке, нажимая на крестик.
+    /// Удаляет цифровую подпись на вкладке и подтверждает удаление в попапе.
     /// </summary>
     public async Task RemoveSignatureAsync()
     {
         Log.Information("[ACTION] Удаляем цифровую подпись с вкладки...");
+
+        // Если это стандартный браузерный alert/confirm, раскомментируйте строчку ниже:
+        // Page.OnceDialogAsync(async dialog => await dialog.AcceptAsync());
 
         // Нацеливаемся строго на компонент подписи внутри панели таба Summary
         var summarySignature = Page.GetByRole(AriaRole.Tabpanel, new() { Name = "Summary" })
@@ -264,16 +267,15 @@ public class SummaryTab : BaseIncidentTabs
         await summarySignature.ScrollIntoViewIfNeededAsync();
         await summarySignature.Locator("mat-icon.remove-sign").ClickAsync();
 
-        Log.Information("[ACTION] Подтверждаем удаление...");
-        // Ждем и кликаем подтверждение
-        await Page.Locator("button:has-text('OK')").ClickAsync();
+        Log.Information("[ACTION] Подтверждаем удаление в попапе...");
+        // Локатор для кнопки OK внутри модального окна (избегаем пересечений с другими кнопками OK)
+        await Page.GetByRole(AriaRole.Button, new() { Name = "OK", Exact = true }).ClickAsync();
 
         Log.Information("[CHECK] Проверяем, что подпись удалена и кнопка 'Sign Here' вернулась...");
 
-        // Проверяем, что кнопка "Sign Here" снова отображается и доступна для клика
+        // Проверяем, что кнопка "Sign Here" снова отображается
         var signHereButton = summarySignature.GetByRole(AriaRole.Button, new() { Name = "Sign Here" });
         await Assertions.Expect(signHereButton).ToBeVisibleAsync(new() { Timeout = 5000 });
-
     }
 
     /// <summary>

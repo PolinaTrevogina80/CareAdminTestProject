@@ -244,6 +244,29 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
             await steps.AssertIncidentIsLockedAsync();
         }
 
+
+        /// <summary>
+        /// Проверяет поведение формы после удаления подписи (Новые требования): 
+        /// Полное подписание -> удаление подписи Summary вызывает предупреждение, 
+        /// но оставляет кнопку сохранения активной -> успешное сохранение автоматически блокирует форму.
+        /// </summary>
+        [Test]
+        public async Task Summary_SignatureRemoved_AllowsSaveAndLocksForm()
+        {
+            // 1. Создаем, заполняем
+            await steps.FillAndSaveEntireIncident(data);
+
+            // 3. Переходим на Summary и удаляем подпись (метод сам обработает попап)
+            await steps.SwitchToTab("Summary");
+            await steps.RemoveSignatireAsync();
+
+            // 4. ИЗМЕНЕНО: Проверяем, что кнопка сохранения ОСТАЕТСЯ АКТИВНОЙ (Save is enabled)
+            await steps.VerifySaveButtonEnabledStateAsync(true);
+
+            // 5. ИЗМЕНЕНО: Сохраняем форму без подписи и проверяем, что документ автоматически залочился
+            await steps.ClickSaveIncidentAsync();
+        }
+
         [Test]
         public async Task Summary_PdfGenerationAndExport_TriggerDownloadAfterSigning()
         {

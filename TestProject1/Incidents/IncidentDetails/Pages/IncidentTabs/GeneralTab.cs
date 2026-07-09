@@ -327,28 +327,31 @@ public class GeneralTab : BaseIncidentTabs
             // In Kendo UI, the button can be either a button element or a span inside it. We use text.
             var todayBtn = popup.GetByRole(AriaRole.Button).Filter(new() { HasText = "Today" });
 
-            //if (await todayBtn.CountAsync() > 0)
-            //{
-            //    await todayBtn.First.ClickAsync(new() { Force = true });
-            //}
-            //else
-            //{
-            //    // Fallback option if it is not a Button by role
-            //    await popup.Locator(".k-calendar-nav-today, .k-nav-today").ClickAsync(new() { Force = true });
-            //}
-
-            // Перехватываем и ждем сетевой ответ от бэкенда при клике
-            await Page.RunAndWaitForResponseAsync(async () =>
+            if (await todayBtn.CountAsync() > 0)
             {
-                if (await todayBtn.CountAsync() > 0)
-                {
-                    await todayBtn.First.ClickAsync(new() { Force = true });
-                }
-                else
-                {
-                    await popup.Locator(".k-calendar-nav-today, .k-nav-today").ClickAsync(new() { Force = true });
-                }
-            }, response => response.Url.Contains("responsible-employees") && response.Status == 200);
+                await todayBtn.First.ClickAsync(new() { Force = true });
+            }
+            else
+            {
+                await popup.Locator(".k-calendar-nav-today, .k-nav-today").ClickAsync(new() { Force = true });
+            }
+
+            // 2. Условное ожидание ответа: ждем либо сам ответ, либо таймаут в 2 секунды
+            try
+            {
+                var responseTask = Page.WaitForResponseAsync(
+                    response => response.Url.Contains("responsible-employees") && response.Status == 200,
+                    new() { Timeout = 2000 } // Ограничиваем ожидание сети до 2 секунд
+                );
+
+                await responseTask;
+                Log.Debug("Network response for 'responsible-employees' received successfully.");
+            }
+            catch (TimeoutException)
+            {
+                // Если упали по таймауту — значит фронтенд не делал запрос (это норма для Dataset 2)
+                Log.Debug("No network request for 'responsible-employees' was triggered (cached state). Proceeding...");
+            }
 
 
             // 4. Wait for closure

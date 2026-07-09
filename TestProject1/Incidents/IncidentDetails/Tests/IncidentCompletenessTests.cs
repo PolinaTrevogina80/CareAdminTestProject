@@ -320,6 +320,9 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
         [Test]
         public async Task AttachmentsTabCompletenessVerification()
         {
+            int count = 5;
+            await steps.UpdateIncidentConfigurationAsync(sectionCode: "Attachments", isEnabled: true, attachmentCount: count);
+
             await steps.FillGeneralTabAsync(data);
             await steps.ClickCreateIncidentAsync();
             var tab = "Attachments";
@@ -329,7 +332,6 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
             await steps.VerifyRedDotTab(tab, true);
 
             int max = 10;
-            int check = 1; // Operational boundary line determining when the indicator badge should vanish
 
             for (int i = 0; i < max; i++)
             {
@@ -345,7 +347,7 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
 
                 // Evaluate the current state of the tab header completeness indicator badge
                 // If uploaded item counts scale lower than 'check' thresholds (first lines execution bounds), the indicator badge stays visible
-                if (i < check - 1)
+                if (i < count - 1)
                 {
                     await steps.VerifyRedDotTab(tab, true);
                 }
