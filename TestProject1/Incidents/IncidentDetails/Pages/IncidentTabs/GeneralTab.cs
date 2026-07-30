@@ -309,60 +309,68 @@ public class GeneralTab : BaseIncidentTabs
     /// <returns>A task that represents the asynchronous operation.</returns>
     public async Task SelectTodayAsync(string nameAttribute)
     {
-
         await ClickControlIcon(nameAttribute);
-
-        // Simplify the locator to the most basic one visible in the screenshot code
-        // Initialize the locator WITHOUT .Last to avoid premature failures
         var popupSearch = Page.Locator("kendo-popup");
 
         try
         {
-            // Wait for at least one popup to appear in the DOM
             await popupSearch.First.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5000 });
-
-            // Now take the last active one
             var popup = popupSearch.Last;
-            // 3. Search for the "Today" button
-            // In Kendo UI, the button can be either a button element or a span inside it. We use text.
             var todayBtn = popup.GetByRole(AriaRole.Button).Filter(new() { HasText = "Today" });
 
-            if (await todayBtn.CountAsync() > 0)
+            // === ИСПРАВЛЕНИЕ 1: Проверяем, не выбрана ли кнопка "Today" уже (активное состояние в календаре)
+            // В Kendo календарях выбранный день обычно имеет класс '.k-selected' или '.k-state-selected'
+            var todayElement = await todayBtn.CountAsync() > 0
+                ? todayBtn.First
+                : popup.Locator(".k-calendar-nav-today, .k-nav-today");
+
+            string classes = await todayElement.GetAttributeAsync("class") ?? "";
+            bool isAlreadySelected = classes.Contains("k-selected") || classes.Contains("k-state-selected");
+
+            Task<IResponse>? responseTask = null;
+
+            if (!isAlreadySelected)
             {
-                await todayBtn.First.ClickAsync(new() { Force = true });
+                Log.Debug($"Date is changing. Initializing network wait for 'employee-configuration'...");
+                // === ИСПРАВЛЕНИЕ 2: Увеличиваем таймаут до 15 секунд, так как бэкенд на скрине отвечает по 7-8 секунд!
+                responseTask = Page.WaitForResponseAsync(
+                    response => response.Url.Contains("employee-configuration") && response.Status == 200,
+                    new() { Timeout = 15000 }
+                );
             }
             else
             {
-                await popup.Locator(".k-calendar-nav-today, .k-nav-today").ClickAsync(new() { Force = true });
+                Log.Debug("Today's date is already selected. Network request will be skipped.");
             }
 
-            // 2. Условное ожидание ответа: ждем либо сам ответ, либо таймаут в 2 секунды
-            try
+            // Кликаем по кнопке (это триггерит отправку запроса в браузер, если дата новая)
+            await todayElement.ClickAsync(new() { Force = true });
+
+            // Теперь, если запрос должен был пойти, дожидаемся его
+            if (responseTask != null)
             {
-                var responseTask = Page.WaitForResponseAsync(
-                    response => response.Url.Contains("responsible-employees") && response.Status == 200,
-                    new() { Timeout = 2000 } // Ограничиваем ожидание сети до 2 секунд
-                );
+                try
+                {
+                    Log.Debug("Waiting for 'employee-configuration' network response (up to 15s)...");
+                    await responseTask;
+                    Log.Debug("Network response for 'employee-configuration' received successfully.");
 
-                await responseTask;
-                Log.Debug("Network response for 'responsible-employees' received successfully.");
+                    // Даем Angular/Kendo время отрендерить новые элементы <mat-option> в DOM
+                    await Page.WaitForTimeoutAsync(500);
+                }
+                catch (TimeoutException)
+                {
+                    Log.Warning("Network request for 'employee-configuration' timed out after 15s. Form might be broken.");
+                }
             }
-            catch (TimeoutException)
-            {
-                // Если упали по таймауту — значит фронтенд не делал запрос (это норма для Dataset 2)
-                Log.Debug("No network request for 'responsible-employees' was triggered (cached state). Proceeding...");
-            }
 
-
-            // 4. Wait for closure
-            await popup.WaitForAsync(new() { State = WaitForSelectorState.Hidden, Timeout = 1000 });
-            // NOTE: Review debug log
+            // Ожидаем закрытия поп-апа календаря
+            await popup.WaitForAsync(new() { State = WaitForSelectorState.Hidden, Timeout = 2000 });
             Log.Debug($"Date 'Today' is selected for the field {nameAttribute}");
         }
         catch (Exception ex)
         {
-            Log.Error($"Error while operating with the calendar  {ex.Message}");
-            // Take a screenshot precisely at the moment of error inside the method
+            Log.Error($"Error while operating with the calendar {ex.Message}");
             await Page.ScreenshotAsync(new() { Path = $"popup_error_{nameAttribute}.png" });
             throw;
         }

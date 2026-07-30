@@ -24,9 +24,9 @@ namespace CareAdminTestProject.Common
         /// <summary>
         /// Gets the target application base URL environment endpoint.
         /// </summary>
-        //public virtual string BaseUrl => "http://localhost:4200";
+        public virtual string BaseUrl => "http://localhost:4200";
         //public virtual string BaseUrl => "https://stg.careadminplus.com";
-        public virtual string BaseUrl => "https://qa.careadminplus.com";
+        //public virtual string BaseUrl => "https://qa.careadminplus.com";
 
         /// <summary>
         /// Dedicated logger instance for tracking framework initialization steps and test lifecycle events.

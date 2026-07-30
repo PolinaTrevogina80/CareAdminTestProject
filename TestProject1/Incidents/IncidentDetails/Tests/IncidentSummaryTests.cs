@@ -217,6 +217,8 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
         [Test]
         public async Task Summary_ForcedSigning_PreventSaveWhenSignatureIsRemoved()
         {
+            await steps.UpdateIncidentConfigurationAsync(sectionCode: "Attachments", isEnabled: true, attachmentCount: 1);
+
             // 1. Создаем, заполняем, подписываем и проверяем блокировку
             await steps.FillAndSaveEntireIncident(data);
             await steps.SignDNS();

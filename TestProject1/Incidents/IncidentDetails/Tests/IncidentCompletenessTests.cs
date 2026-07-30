@@ -18,6 +18,9 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
         public async Task GeneralTabCompletenessVerification()
         {
             var tab = "General";
+            await steps.UpdateIncidentConfigurationAsync(sectionCode: tab, isEnabled: true);
+
+            await steps.ReloadNewIncidentPage();
 
             await steps.ClearGeneralForm();
 
@@ -51,6 +54,9 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
         public async Task GeneralFieldsCompletenessVerification()
         {
             var tab = "General";
+            await steps.UpdateIncidentConfigurationAsync(sectionCode: tab, isEnabled: true);
+
+            await steps.ReloadNewIncidentPage();
 
             await steps.ClearGeneralForm();
             await steps.VerifyRedDotField(steps.CreatePage.General, "Date of Incident", true);
@@ -69,6 +75,9 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
         public async Task DetailsTabCompletenessVerification()
         {
             var tab = "Details";
+            await steps.UpdateIncidentConfigurationAsync(sectionCode: tab, isEnabled: true);
+
+            await steps.ReloadNewIncidentPage();
 
             await steps.FillGeneralTabAsync(data);
             await steps.SwitchToTab(tab);
@@ -105,6 +114,9 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
         public async Task DetailsFieldsCompletenessVerification()
         {
             var tab = "Details";
+            await steps.UpdateIncidentConfigurationAsync(sectionCode: tab, isEnabled: true);
+
+            await steps.ReloadNewIncidentPage();
 
             await steps.FillGeneralTabAsync(data);
             await steps.SwitchToTab(tab);
@@ -131,6 +143,9 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
         public async Task StateTabCompletenessVerification()
         {
             var tab = "State";
+            await steps.UpdateIncidentConfigurationAsync(sectionCode: tab, isEnabled: true);
+
+            await steps.ReloadNewIncidentPage();
 
             await steps.FillGeneralTabAsync(data);
             await steps.SwitchToTab(tab);
@@ -159,8 +174,13 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
         [Test]
         public async Task StateFieldsCompletenessVerification()
         {
+            var tab = "State";
+            await steps.UpdateIncidentConfigurationAsync(sectionCode: tab, isEnabled: true);
+
+            await steps.ReloadNewIncidentPage();
+
             await steps.FillGeneralTabAsync(data);
-            await steps.SwitchToTab("State");
+            await steps.SwitchToTab(tab);
 
             //await steps.VerifyRedDotTab("State", true);
 
@@ -177,6 +197,9 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
         public async Task MedicationTabCompletenessVerification()
         {
             var tab = "Medication";
+            await steps.UpdateIncidentConfigurationAsync(sectionCode: tab, isEnabled: true);
+
+            await steps.ReloadNewIncidentPage();
 
             await steps.FillGeneralTabAsync(data);
             await steps.SwitchToTab(tab);
@@ -212,8 +235,13 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
         [Test]
         public async Task MedicationFieldsCompletenessVerification()
         {
+            var tab = "Medication";
+            await steps.UpdateIncidentConfigurationAsync(sectionCode: tab, isEnabled: true);
+
+            await steps.ReloadNewIncidentPage();
+
             await steps.FillGeneralTabAsync(data);
-            await steps.SwitchToTab("Medication");
+            await steps.SwitchToTab(tab);
             await steps.VerifyMedicationTabFullLifecycleAndIndicatorAsync();
         }
 
@@ -225,8 +253,12 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
         [Test]
         public async Task RNInvestigationFormTabCompletenessVerification()
         {
-            await steps.FillGeneralTabAsync(data);
             var tab = "RN Supervisor Investigation Form";
+            await steps.UpdateIncidentConfigurationAsync(sectionCode: tab, isEnabled: true);
+
+            await steps.ReloadNewIncidentPage();
+
+            await steps.FillGeneralTabAsync(data);
             await steps.SwitchToTab(tab);
 
             // Verify that the parent Tab header element maps with its required incomplete indicator badge
@@ -255,9 +287,14 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
         [Test]
         public async Task RnInvestigationFormFieldsCompletenessVerification()
         {
+            var tab = "RN Supervisor Investigation Form";
+            await steps.UpdateIncidentConfigurationAsync(sectionCode: tab, isEnabled: true);
+
+            await steps.ReloadNewIncidentPage();
+
             await steps.FillGeneralTabAsync(data);
             await steps.FillDetailsTabAsync(data);
-            await steps.SwitchToTab("RN Supervisor Investigation Form");
+            await steps.SwitchToTab(tab);
 
             await steps.FillRNFormTabWithTabCheckAsync(data);
         }
@@ -270,9 +307,15 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
         [Test]
         public async Task SummaryTabCompletenessVerification()
         {
+            var tab = "Summary";
+            await steps.UpdateIncidentConfigurationAsync(sectionCode: tab, isEnabled: true);
+
+            await steps.ReloadNewIncidentPage();
+
             await steps.FillGeneralTabAsync(data);
             await steps.ClickCreateIncidentAsync();
-            var tab = "Summary";
+
+
             await steps.SwitchToTab(tab);
 
             // Verify that the parent Tab header element maps with its required incomplete indicator badge
@@ -306,8 +349,13 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
         [Test]
         public async Task SummaryFieldsCompletenessVerification()
         {
+            var tab = "Summary";
+            await steps.UpdateIncidentConfigurationAsync(sectionCode: tab, isEnabled: true);
+
+            await steps.ReloadNewIncidentPage();
+
             await steps.FillGeneralTabAsync(data);
-            await steps.SwitchToTab("Summary");
+            await steps.SwitchToTab(tab);
 
             await steps.VerifyFieldsOneByOneWithFilling(steps.CreatePage.Summary, data.Summary);
         }
@@ -320,12 +368,14 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
         [Test]
         public async Task AttachmentsTabCompletenessVerification()
         {
+            var tab = "Attachments";
             int count = 5;
-            await steps.UpdateIncidentConfigurationAsync(sectionCode: "Attachments", isEnabled: true, attachmentCount: count);
+            await steps.UpdateIncidentConfigurationAsync(sectionCode: tab, isEnabled: true, attachmentCount: count);
+
+            await steps.ReloadNewIncidentPage();
 
             await steps.FillGeneralTabAsync(data);
             await steps.ClickCreateIncidentAsync();
-            var tab = "Attachments";
             await steps.SwitchToTab(tab);
 
             // Verify that the parent Tab header element maps with its required incomplete indicator badge before upload sequences initialize
@@ -367,13 +417,227 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
         [Test]
         public async Task AttachmentsTabSingleMultyPageFileCompletenessVerification()
         {
+            var tab = "Attachments";
+            int count = 5;
+            await steps.UpdateIncidentConfigurationAsync(sectionCode: tab, isEnabled: true, attachmentCount: count);
+
+            await steps.ReloadNewIncidentPage();
+
             await steps.FillGeneralTabAsync(data);
             await steps.ClickCreateIncidentAsync();
-            var tab = "Attachments";
+
+
             await steps.SwitchToTab(tab);
 
             // Verify that the parent Tab header element maps with its required incomplete indicator badge
             await steps.VerifyRedDotTab(tab, true);
+
+            // Populate multi-page attachment data parameters
+            await steps.UploadAttachmentTabAsync(AttachmentsTab.AttachmentCategories, fileNameString: "test_10pages.pdf", toScreenShot: true);
+            await steps.VerifyRedDotTab(tab, false);
+        }
+
+        /// <summary>
+        /// Validates apsense of requirement indicators transitions for the General tab 
+        /// before submission, after data injection, and following draft persistence
+        /// if they are swithed off in configuration.
+        /// </summary>
+        /// <returns>A task representing the asynchronous operation.</returns>
+        [Test]
+        public async Task GeneralTabSwitchOffCompletenessVerification()
+        {
+            var tab = "General";
+            await steps.UpdateIncidentConfigurationAsync(sectionCode: tab, isEnabled: false);
+
+            await steps.ReloadNewIncidentPage();
+
+            await steps.ClearGeneralForm();
+
+            // Verify that all mandatory marked input fields do not display their required completeness indicator badges
+            await steps.VerifyAllFieldsDotsStateAsync(steps.CreatePage.General, data.General, false);
+            // Verify that the parent Tab header element maps with its required incomplete indicator badge
+            await steps.VerifyRedDotTab(tab, false);
+            // Populate data fields
+            await steps.FillGeneralTabAsync(data);
+
+            // Pre-submission check state evaluations
+            // Verify that all mandatory marked fields successfully hide their requirement indicator badges
+            await steps.VerifyAllFieldsDotsStateAsync(steps.CreatePage.General, data.General, false);
+            // Verify that the parent Tab header element masks its incomplete indicator badge away
+            await steps.VerifyRedDotTab(tab, false);
+            await steps.ClickCreateIncidentAsync();
+
+            // Post-submission check state evaluations
+            // Verify that the parent Tab header element remains clean without incomplete indicator badges
+            await steps.VerifyRedDotTab(tab, false);
+            // Verify that all mandatory marked input fields remain clean without required completeness indicator badges
+            await steps.VerifyAllFieldsDotsStateAsync(steps.CreatePage.General, data.General, false);
+        }
+
+        /// <summary>
+        /// Validates apsense of requirement indicators transitions for the Details tab, 
+        /// isolating dynamic behavior of sub-fields triggered conditionally by First Aid toggles
+        /// if they are swithed off in configuration.
+        /// </summary>
+        /// <returns>A task representing the asynchronous operation.</returns>
+        [Test]
+        public async Task DetailsTabSwitchedOffCompletenessVerification()
+        {
+            var tab = "Details";
+            await steps.UpdateIncidentConfigurationAsync(sectionCode: tab, isEnabled: false);
+
+            await steps.ReloadNewIncidentPage();
+
+            await steps.FillGeneralTabAsync(data);
+            await steps.SwitchToTab(tab);
+            string diagnoses = await steps.ClearDetailsForm();
+            data = data with
+            {
+                Details = data.Details with { AllDiagnoses = diagnoses }
+            };
+
+            await steps.VerifyRedDotTab(tab, false);
+
+            await steps.SwitchFirstAid(true);
+            await steps.VerifyAllFieldsDotsStateAsync(steps.CreatePage.Details, data.Details, false);
+            await steps.FillDetailsTabAsync(data);
+
+            await steps.VerifyAllFieldsDotsStateAsync(steps.CreatePage.Details, data.Details, false);
+            await steps.VerifyRedDotTab(tab, false);
+            await steps.ClickCreateIncidentAsync();
+
+            await steps.VerifyRedDotTab(tab, false);
+            await steps.VerifyAllFieldsDotsStateAsync(steps.CreatePage.Details, data.Details, false);
+        }
+
+        /// <summary>
+        /// Validates apsense of requirement indicators transitions for the State tab, 
+        /// evaluating tab header badge status responses before and after data persistence.
+        /// </summary>
+        /// <returns>A task representing the asynchronous operation.</returns>
+        [Test]
+        public async Task StateTabSwitchedOffCompletenessVerification()
+        {
+            var tab = "State";
+            await steps.UpdateIncidentConfigurationAsync(sectionCode: tab, isEnabled: false);
+
+            await steps.ReloadNewIncidentPage();
+
+            await steps.FillGeneralTabAsync(data);
+            await steps.SwitchToTab(tab);
+
+            // Verify that the parent Tab header element maps with its required incomplete indicator badge
+            await steps.VerifyRedDotTab(tab, false);
+
+            // Populate data fields
+            await steps.FillStateTabAsync(data);
+
+            // Pre-submission check state evaluations
+            // Verify that the parent Tab header element masks its incomplete indicator badge away
+            await steps.VerifyRedDotTab(tab, false);
+            await steps.ClickCreateIncidentAsync();
+
+            // Post-submission check state evaluations
+            // Verify that the parent Tab header element remains clean without incomplete indicator badges
+            await steps.VerifyRedDotTab(tab, false);
+        }
+
+
+        /// <summary>
+        /// Validates apsense of requirement indicator transitions for the Medication tab 
+        /// before data entry, after row clearing, and following form saving.
+        /// </summary>
+        /// <returns>A task representing the asynchronous operation.</returns>
+        [Test]
+        public async Task MedicationTabSwithcedOffCompletenessVerification()
+        {
+            var tab = "Medication";
+            await steps.UpdateIncidentConfigurationAsync(sectionCode: tab, isEnabled: false);
+
+            await steps.ReloadNewIncidentPage();
+
+            await steps.FillGeneralTabAsync(data);
+            await steps.SwitchToTab(tab);
+
+            // Verify that the parent Tab header element maps with its required incomplete indicator badge
+            await steps.VerifyRedDotTab(tab, false);
+
+            // Populate data fields
+            await steps.FillMedicationTabAsync(data);
+
+            // Pre-submission check state evaluations
+            // Verify that the parent Tab header element masks its incomplete indicator badge away
+            await steps.VerifyRedDotTab(tab, false);
+            await steps.ClickCreateIncidentAsync();
+
+
+            await steps.ClearMedicationTabAsync();
+            await steps.VerifyRedDotTab(tab, false);
+
+            await steps.FillMedicationTabAsync(data);
+
+            await steps.ClickSaveIncidentAsync();
+
+            // Post-submission check state evaluations
+            // Verify that the parent Tab header element remains clean without incomplete indicator badges
+            await steps.VerifyRedDotTab(tab, false);
+        }
+
+        /// <summary>
+        /// Validates bulk requirement indicator transitions for the RN Supervisor Investigation Form tab 
+        /// before submission, after data entry, and following draft saving.
+        /// </summary>
+        /// <returns>A task representing the asynchronous operation.</returns>
+        [Test]
+        public async Task RNInvestigationFormTabSwitchedOffCompletenessVerification()
+        {
+            var tab = "RN Supervisor Investigation Form";
+            await steps.UpdateIncidentConfigurationAsync(sectionCode: tab, isEnabled: false);
+
+            await steps.ReloadNewIncidentPage();
+
+            await steps.FillGeneralTabAsync(data);
+            await steps.SwitchToTab(tab);
+
+            // Verify that the parent Tab header element maps with its required incomplete indicator badge
+            await steps.VerifyRedDotTab(tab, false);
+
+            // Populate data fields
+            await steps.FillRNFormTabAsync(data);
+
+            // Pre-submission check state evaluations
+            // Verify that the parent Tab header element masks its incomplete indicator badge away
+            await steps.VerifyRedDotTab(tab, false);
+            await steps.ClickCreateIncidentAsync();
+
+            //            await steps.ClickSaveIncidentAsync();
+
+            // Post-submission check state evaluations
+            // Verify that the parent Tab header element remains clean without incomplete indicator badges
+            await steps.VerifyRedDotTab(tab, false);
+        }
+
+
+        /// <summary>
+        /// Verifies that uploading a single multi-page file and mapping required category layouts 
+        /// successfully satisfies and clears the Attachments tab completeness requirement in one action.
+        /// </summary>
+        /// <returns>A task representing the asynchronous operation.</returns>
+        [Test]
+        public async Task AttachmentsTabSwitchedOffCompletenessVerification()
+        {
+            var tab = "Attachments";
+            await steps.UpdateIncidentConfigurationAsync(sectionCode: tab, isEnabled: false);
+
+            await steps.ReloadNewIncidentPage();
+
+            await steps.FillGeneralTabAsync(data);
+            await steps.ClickCreateIncidentAsync();
+
+            await steps.SwitchToTab(tab);
+
+            // Verify that the parent Tab header element maps with its required incomplete indicator badge
+            await steps.VerifyRedDotTab(tab, false);
 
             // Populate multi-page attachment data parameters
             await steps.UploadAttachmentTabAsync(AttachmentsTab.AttachmentCategories, fileNameString: "test_10pages.pdf", toScreenShot: true);

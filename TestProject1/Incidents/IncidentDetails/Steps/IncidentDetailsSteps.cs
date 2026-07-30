@@ -1,11 +1,11 @@
 ﻿using CareAdminTestProject.Common;
+using CareAdminTestProject.Incidents.CommonIncidentTests;
 using CareAdminTestProject.Incidents.Helpers;
 using CareAdminTestProject.Incidents.IncidentDetails.Pages.IncidentTabs;
 using Microsoft.Playwright;
-using Microsoft.Testing.Platform.Configurations;
-using UglyToad.PdfPig;
-using System.Reflection.PortableExecutable;
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using UglyToad.PdfPig;
 using static CareAdminTestProject.Common.PlaywrightExtensions;
 using static CareAdminTestProject.Incidents.IncidentDetails.Pages.IncidentTabs.BaseIncidentTabs;
 using static DetailsTab;
@@ -78,29 +78,22 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
     /// </list>
     /// </summary>
 
-    public class IncidentDetailsSteps
+    public class IncidentDetailsSteps : BaseIncidentSteps
     {
-        private readonly IPage _page;
-        private readonly IncidentCreatePage _createPage;
-        private readonly IncidentTrackerPage _trackerPage;
+        // Конструктор просто пробрасывает страницу наверх
+        public IncidentDetailsSteps(IPage page) : base(page)
+        {
+        }
+
 
         /// <summary> Gets the underlying page object controller for the incident creation wizard framework. </summary>
         public IncidentCreatePage CreatePage => _createPage;
         string fileName;
+        int residentInd;
 
         /// <summary> Holds the state of the parsed general incident dataset during the runtime workflow transaction. </summary>
         public IncidentGeneralInfo CapturedGeneralData { get; private set; }
 
-        /// <summary>
-        /// Initializes a new instance of the <see cref="IncidentDetailsSteps"/> class.
-        /// </summary>
-        /// <param name="page">The isolated Playwright page context instance assigned to the running thread.</param>
-        public IncidentDetailsSteps(IPage page)
-        {
-            _page = page;
-            _createPage = new IncidentCreatePage(page);
-            _trackerPage = new IncidentTrackerPage(page);
-        }
 
         /// <summary>
         /// Navigates through the tracking repository dashboard and triggers the workspace initialization for a new blank incident form.
@@ -122,6 +115,7 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
         {
             Log.Debug($"Try to select resident with the index {i} in the list");
             var info = await _createPage.SelectResidentAsyncByInd(i);
+            residentInd = i;
 
             var residentNameLink = _page.Locator("a.link.resident-name").First;
             await residentNameLink.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 10000 });
@@ -182,6 +176,13 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
         {
             await _page.GotoAsync(url);
             await _page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+        }
+
+        public async Task ReloadNewIncidentPage()
+        {
+            var url = await GetCurrentUrlAsync();
+            await ReloadPageAndNavigateAsync(url);
+            await SelectResidentAsync(residentInd);
         }
 
         /// <summary>
@@ -957,82 +958,6 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
             await _createPage.Summary.RemoveSignatureAsync();
         }
 
-        /// <summary>
-        /// Manages the full dashboard navigation workflow loop by expanding targeted sidebar panels and tracking the resulting browser URL transformation changes.
-        /// </summary>
-        /// <returns>A task representing the asynchronous operation.</returns>
-        public async Task NavigateToTrackerViaMenu()
-        {
-            const int maxRetries = 3;
-
-            for (int attempt = 1; attempt <= maxRetries; attempt++)
-            {
-                try
-                {
-                    Log.Debug($"[NAVIGATION] Attempt {attempt} of {maxRetries}: Checking current page state...");
-
-                    var newIncidentBtn = _page.GetByRole(AriaRole.Button, new() { Name = "New Incident" });
-
-                    // Fast track: if we are already on the tracker page and the main action button is visible, skip navigation
-                    if (_page.Url.Contains("/tracker", StringComparison.OrdinalIgnoreCase) && await newIncidentBtn.IsVisibleAsync())
-                    {
-                        Log.Information("[NAVIGATION] Already on the Tracker page with active UI. Skipping menu interaction.");
-                        return;
-                    }
-
-                    Log.Debug("[NAVIGATION] Opening Tracker via menu...");
-
-                    var parentMenu = _page.Locator("li").Filter(new() { HasText = "Accident/Incident" });
-                    var trackerLink = parentMenu.Locator("a").Filter(new() { HasText = "Tracker" });
-
-                    if (!await trackerLink.IsVisibleAsync())
-                    {
-                        Log.Debug("[NAVIGATION] Sidebar panel is collapsed. Triggering menu expansion...");
-                        var menuTrigger = parentMenu.Locator(".k-icon, .arrow-icon, span, a")
-                                                    .GetByText("Accident/Incident", new() { Exact = false })
-                                                    .First;
-
-                        // Force click if the menu is covered by a fading overlay or transition
-                        await menuTrigger.ClickAsync(new() { Force = true });
-                        await trackerLink.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5000 });
-                    }
-
-                    Log.Debug("[NAVIGATION] Clicking on the Tracker link...");
-                    await trackerLink.ClickAsync();
-
-                    Log.Debug("[NAVIGATION] Waiting for 'New Incident' button to ensure page is loaded...");
-                    // Reduced initial timeout per attempt to fail fast and retry if UI is frozen
-                    await newIncidentBtn.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 10000 });
-
-                    var trackerSpinner = _page.Locator(".loading-overlay, .spinner, kendo-textbox-loading-icon, [class*='loading']").First;
-
-                    if (await trackerSpinner.IsVisibleAsync())
-                    {
-                        Log.Debug("[NAVIGATION] Tracker page loading spinner detected. Waiting for data grid to stabilize...");
-                        await trackerSpinner.WaitForAsync(new() { State = WaitForSelectorState.Hidden, Timeout = 20000 });
-                    }
-
-                    await Task.Delay(500);
-                    Log.Information($"[NAVIGATION SUCCESS] Navigated to Tracker menu successfully on attempt {attempt}.");
-                    return; // Success! Exit the method.
-                }
-                catch (Exception ex)
-                {
-                    Log.Warning($"[NAVIGATION FAILED] Attempt {attempt} failed. Current URL: {_page.Url}. Error: {ex.Message}");
-
-                    if (attempt == maxRetries)
-                    {
-                        Log.Error($"[NAVIGATION CRITICAL] Failed to navigate to Tracker after {maxRetries} attempts.");
-                        throw;
-                    }
-
-                    // Refreshing the page before the next attempt can clear broken UI/Kendo states
-                    Log.Debug("[NAVIGATION RETRY] Refreshing page state before next navigation attempt...");
-                    await _page.ReloadAsync(new() { WaitUntil = WaitUntilState.Commit });
-                    await Task.Delay(1500);
-                }
-            }
-        }
 
         /// <summary>
         /// Steps sequentially through individual field validation mappings to verify the red dot completeness indicators vanish immediately post field filling actions.
@@ -1423,7 +1348,57 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
             await VerifyUiDropdownsCountAsync(expectedSupervisor, expectedChargeNurse, expectedCna);
         }
 
-        private async Task UnlockStaffSectionByFillingDateAsync()
+        public string FindValidEmployeeIdForTest(string employeesJson, string currentConfigJson, string sectionRole)
+        {
+            // 1. Парсим конфигурацию, чтобы собрать ID тех, кто уже там сидит
+            using var configDoc = JsonDocument.Parse(currentConfigJson);
+            var configRoot = configDoc.RootElement;
+            var incidentConfig = configRoot.TryGetProperty("incidentConfiguration", out var incProp) ? incProp : configRoot;
+
+            var existingIds = new HashSet<string>();
+            if (incidentConfig.TryGetProperty(sectionRole, out var roleConfig) &&
+                roleConfig.TryGetProperty("employeeConstraints", out var constraints) &&
+                constraints.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in constraints.EnumerateArray())
+                {
+                    if (item.ValueKind == JsonValueKind.String)
+                        existingIds.Add(item.GetString());
+                }
+            }
+
+            // 2. Парсим сотрудников и ищем первого активного, которого нет в existingIds
+            using var employeesDoc = JsonDocument.Parse(employeesJson);
+            var employeesRoot = employeesDoc.RootElement;
+            var allEmployees = employeesRoot.ValueKind == JsonValueKind.Array
+                ? employeesRoot.EnumerateArray().ToList()
+                : employeesRoot.GetProperty("records").EnumerateArray().ToList();
+
+            DateTime today = DateTime.Today;
+
+            var targetEmployee = allEmployees.FirstOrDefault(e =>
+            {
+                string empId = e.GetProperty("id").GetString();
+
+                // Проверяем, что сотрудника еще нет в конфигурации
+                if (existingIds.Contains(empId)) return false;
+
+                // Проверяем активность (ваша логика)
+                if (!e.TryGetProperty("termDate", out var termProp) || termProp.ValueKind == JsonValueKind.Null)
+                    return true;
+
+                return DateTime.TryParse(termProp.GetString(), out DateTime termDate) && termDate > today;
+            });
+
+            if (targetEmployee.ValueKind == JsonValueKind.Undefined)
+            {
+                Assert.Inconclusive("[STAFF_VALIDATION] Не удалось найти активного сотрудника, которого ещё нет в конфигурации, для теста.");
+            }
+
+            return targetEmployee.GetProperty("id").GetString();
+        }
+
+        public async Task UnlockStaffSectionByFillingDateAsync()
         {
             Log.Information("[STAFF_VALIDATION] Verifying locking overlay text...");
             var overlayLocator = _page.Locator("text=Enter Incident Date to unlock this section");
@@ -1534,7 +1509,7 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
         /// <summary>
         /// Helper method to open a Kendo dropdown by its label, count its items, and close it safely.
         /// </summary>
-        private async Task<int> GetMaterialDropdownOptionsCountAsync(string dropdownLabel)
+        public async Task<int> GetMaterialDropdownOptionsCountAsync(string dropdownLabel)
         {
             Log.Debug($"[STAFF_VALIDATION] Opening dropdown for: '{dropdownLabel}'...");
 
@@ -1562,6 +1537,209 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
             await _page.WaitForTimeoutAsync(200);
 
             return count;
+        }
+
+        public async Task<List<string>> GetMaterialDropdownOptionsTextAsync(string labelText)
+        {
+            var dropdown = _createPage.General.GetFieldByLabel(labelText).First;
+            await dropdown.ClickAsync();
+
+            var optionsLocator = _page.Locator(".cdk-overlay-container mat-option:visible");
+            await optionsLocator.First.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5000 });
+
+            // Вытаскиваем внутренний текст всех доступных сотрудников
+            var allTexts = await optionsLocator.AllInnerTextsAsync();
+
+            await _page.Keyboard.PressAsync("Escape");
+            await _page.Locator(".cdk-overlay-container").WaitForAsync(new() { State = WaitForSelectorState.Hidden });
+
+            return allTexts.ToList();
+        }
+
+        public async Task<(string Id, string Name)> GetAvailableActiveEmployeeAsync(string sectionRole)
+        {
+            var payload = new { facilityId = "c1f80483-fd30-4327-814e-778ad171a67b" };
+            string employeesJson = await _page.ApiPostRequest("employees", payload);
+
+            string currentConfigJson = await GetEmployeeConfigurationAsync();
+            using var configDoc = JsonDocument.Parse(currentConfigJson);
+            var existingIds = new HashSet<string>();
+
+            if (configDoc.RootElement.TryGetProperty("incidentConfiguration", out var incProp) &&
+                incProp.TryGetProperty(sectionRole, out var roleConfig))
+            {
+                // 1. Пытаемся прочитать либо employeeConstraints, либо userConstraints
+                string arrayKey = roleConfig.TryGetProperty("userConstraints", out _) ? "userConstraints" : "employeeConstraints";
+
+                if (roleConfig.TryGetProperty(arrayKey, out var constraints) && constraints.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var item in constraints.EnumerateArray())
+                    {
+                        // 2. ИСПРАВЛЕНО: Считываем ID из свойств объектов constraintId или id/userId
+                        string idValue = null;
+                        if (item.TryGetProperty("constraintId", out var cId)) idValue = cId.GetString();
+                        else if (item.TryGetProperty("userId", out var uId)) idValue = uId.GetString();
+                        else if (item.TryGetProperty("id", out var fallbackId)) idValue = fallbackId.GetString();
+
+                        if (!string.IsNullOrEmpty(idValue))
+                        {
+                            existingIds.Add(idValue);
+                        }
+                    }
+                }
+            }
+
+            using var employeesDoc = JsonDocument.Parse(employeesJson);
+            var allEmployees = employeesDoc.RootElement.ValueKind == JsonValueKind.Array
+                ? employeesDoc.RootElement.EnumerateArray()
+                : employeesDoc.RootElement.GetProperty("records").EnumerateArray();
+
+            DateTime today = DateTime.Today;
+
+            foreach (var e in allEmployees)
+            {
+                string empId = e.GetProperty("id").GetString();
+                if (existingIds.Contains(empId)) continue; // Теперь пропуск уже добавленных сработает!
+
+                // Формируем имя в формате "LastName, FirstName", как на вашем UI скрине дропдауна
+                string lastName = e.GetProperty("lastName").GetString();
+                string firstName = e.GetProperty("firstName").GetString();
+                string formattedUiName = $"{lastName}, {firstName}";
+
+                if (!e.TryGetProperty("termDate", out var termProp) || termProp.ValueKind == JsonValueKind.Null)
+                {
+                    return (empId, formattedUiName);
+                }
+
+                if (DateTime.TryParse(termProp.GetString(), out DateTime termDate) && termDate > today)
+                {
+                    return (empId, formattedUiName);
+                }
+            }
+
+            Assert.Inconclusive($"[STAFF_STEPS] Не удалось найти свободного активного сотрудника для секции {sectionRole}.");
+            return (null, null);
+        }
+
+        // 2. Метод-мутатор: Добавить или Удалить сотрудника из слепка конфигурации
+        public async Task ModifyEmployeeConstraintAsync(string sectionRole, string employeeId, bool isAdding)
+        {
+            string currentConfigJson = await GetEmployeeConfigurationAsync();
+            var configNode = JsonNode.Parse(currentConfigJson);
+
+            // 1. Переходим к целевой роли строго внутри incidentConfiguration
+            var roleConfig = configNode?["incidentConfiguration"]?[sectionRole];
+            if (roleConfig == null)
+                Assert.Fail($"[STAFF_STEPS] Роль {sectionRole} не найдена в JSON.");
+
+            // 2. Определяем точное имя массива (userConstraints или employeeConstraints)
+            string arrayName = roleConfig["userConstraints"] != null ? "userConstraints" : "employeeConstraints";
+            var userConstraints = roleConfig[arrayName]?.AsArray();
+
+            if (userConstraints == null)
+                Assert.Fail($"[STAFF_STEPS] Массив ограничений '{arrayName}' для {sectionRole} не найден.");
+
+            if (isAdding)
+            {
+                Log.Information($"[STAFF_STEPS] Маппинг сотрудника {employeeId} для сохранения...");
+
+                JsonNode constraintObject;
+
+                // Строим DTO в зависимости от типа массива (выявлено на основе анализа схемы вашего API)
+                if (arrayName == "employeeConstraints")
+                {
+                    // Для сотрудников бэкенд ждет строго constraintId, куда пишется ID сотрудника
+                    constraintObject = new JsonObject
+                    {
+                        ["constraintId"] = employeeId
+                    };
+                }
+                else
+                {
+                    // Для пользователей (userConstraints) используется стандартный формат с incidentUserConfigurationId
+                    string parentConfigId = userConstraints.Count > 0
+                        ? userConstraints[0]?["incidentUserConfigurationId"]?.ToString()
+                        : roleConfig["id"]?.ToString();
+
+                    constraintObject = new JsonObject
+                    {
+                        ["id"] = Guid.NewGuid().ToString(),
+                        ["incidentUserConfigurationId"] = parentConfigId,
+                        ["userId"] = employeeId
+                    };
+                }
+
+                userConstraints.Add(constraintObject);
+            }
+            else
+            {
+                Log.Information($"[STAFF_STEPS] Удаление сотрудника {employeeId} из конфига {sectionRole}");
+
+                // Универсальный поиск ноды для удаления по любому из возможных ключей идентификатора
+                var nodeToRemove = userConstraints.FirstOrDefault(x =>
+                    x?["constraintId"]?.ToString() == employeeId ||
+                    x?["userId"]?.ToString() == employeeId ||
+                    x?["employeeId"]?.ToString() == employeeId);
+
+                if (nodeToRemove != null)
+                    userConstraints.Remove(nodeToRemove);
+            }
+
+            // 3. Выводим отладочный лог ИМЕННО измененного фрагмента роли
+            string debugRolePayload = roleConfig.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+            Log.Information($"[API_MUTATION_DEBUG] Role section '{sectionRole}' state right before POST:\n{debugRolePayload}");
+
+            // 4. Отправляем ВЕСЬ измененный корневой configNode (как требует контракт API)
+            await UpdateEmployeeConfigurationAsync(configNode);
+        }
+
+        // 3. Строгая проверка наличия или отсутствия имени в конкретном Material дропдауне
+        public async Task VerifyEmployeeInDropdownAsync(string uiRoleName, string employeeName, bool shouldBePresent)
+        {
+            // Получаем все текстовые опции из вашего дропдауна (метод сбора строк нужно будет вызвать/написать)
+            var options = await GetMaterialDropdownOptionsTextAsync(uiRoleName);
+
+            bool isPresent = options.Any(opt => opt.Contains(employeeName, StringComparison.OrdinalIgnoreCase));
+
+            if (shouldBePresent)
+            {
+                Assert.That(isPresent, Is.True, $"Сотрудник '{employeeName}' должен быть в дропдауне '{uiRoleName}', но его там нет.");
+            }
+            else
+            {
+                Assert.That(isPresent, Is.False, $"Сотрудник '{employeeName}' НЕ должен отображаться в дропдауне '{uiRoleName}', но он присутствует.");
+            }
+        }
+
+        // Метод делает GET-запрос актуального состояния конфигурации сотрудников
+        public async Task<string> GetEmployeeConfigurationAsync()
+        {
+            var contextHeaders = new Dictionary<string, string>
+            {
+                { "X-App-Id", "AccidentIncident" },
+                { "X-Context-Id", "c1f80483-fd30-4327-814e-778ad171a67b" }, // ID вашей Facility
+                { "X-Context-Type", "Facility" },
+                { "X-Tenant-Id", "CassenaCare" }
+            };
+
+            // Вызываем ваш стандартный GET-метод проекта
+            return await _page.ApiGetRequest("incident/employee-configuration", customHeaders: contextHeaders);
+        }
+
+        // Метод делает POST-запрос и отправляет измененный слепок JSON обратно на бэкенд
+        public async Task UpdateEmployeeConfigurationAsync(System.Text.Json.Nodes.JsonNode fullPayload)
+        {
+            var contextHeaders = new Dictionary<string, string>
+            {
+                { "X-App-Id", "AccidentIncident" },
+                { "X-Context-Id", "c1f80483-fd30-4327-814e-778ad171a67b" },
+                { "X-Context-Type", "Facility" },
+                { "X-Tenant-Id", "CassenaCare" }
+            };
+
+            // Вызываем ваш POST-метод. Так как Playwright принимает объекты для тела запроса, 
+            // передаем туда наш измененный JsonNode напрямую.
+            await _page.ApiPostRequest("incident/employee-configuration", fullPayload, customHeaders: contextHeaders);
         }
 
         /// <summary>
@@ -1712,6 +1890,11 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
 
             var configData = JsonSerializer.Deserialize<CompletionConfigResponse>(rawJsonGet);
             Assert.That(configData, Is.Not.Null, "Не удалось десериализовать JSON конфигурации.");
+            
+            if (sectionCode.Equals("RN Supervisor Investigation Form"))
+            {
+                sectionCode = "EnvironmentalAssessment";
+            }
 
             // 2. Находим нужную секцию
             var targetSection = configData.CompletionConfigurations

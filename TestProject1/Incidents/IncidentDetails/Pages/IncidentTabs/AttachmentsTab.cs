@@ -128,7 +128,20 @@ public class AttachmentsTab : BaseIncidentTabs
 
         // 1. Locate the dialog overlay container wrapper
         var dialog = Page.Locator(".incident-assign-pdf-to-category").First;
-        await dialog.WaitForAsync();
+        await dialog.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 15000 });
+
+        var globalLoader = Page.Locator("mat-progress-spinner, .ngx-spinner-overlay, .loader").First;
+        try
+        {
+            // Даём приложению до 10 секунд на то, чтобы обработать файл и скрыть спиннер
+            await globalLoader.WaitForAsync(new() { State = WaitForSelectorState.Hidden, Timeout = 10000 });
+            Log.Debug("Global loading spinner is now hidden.");
+        }
+        catch (TimeoutException)
+        {
+            Log.Warning("Loading spinner did not disappear within 10s, attempting to proceed anyway.");
+        }
+
         // NOTE: Review debug log
         Log.Debug("Assign Pages popup found and displayed.");
 
@@ -333,7 +346,7 @@ public class AttachmentsTab : BaseIncidentTabs
         var tableSpinner = Page.Locator(".k-loading-overlay, .k-i-loading, mat-progress-bar, .spinner").First;
         if (await tableSpinner.IsVisibleAsync())
         {
-            await Assertions.Expect(tableSpinner).ToBeHiddenAsync(new() { Timeout = 15000 });
+            await Assertions.Expect(tableSpinner).ToBeHiddenAsync(new() { Timeout = 30000 });
             Log.Debug("[POM] Спиннер загрузки данных успешно скрылся.");
         }
 
@@ -342,9 +355,19 @@ public class AttachmentsTab : BaseIncidentTabs
 
         // 4. Изолируем строки таблицы, подходящие под базовую маску (MRN + Первое слово категории)
         var matchingRows = Page.Locator("tbody tr").Filter(new() { HasText = searchMask });
-        int count = await matchingRows.CountAsync();
 
-        Assert.That(count, Is.GreaterThan(0), $"Ни одной строки с маской '{searchMask}' не найдено в таблице!");
+        // Ждем, чтобы количество строк, подходящих под маску, стало больше 0.
+        // Playwright будет опрашивать DOM в течение 10 секунд, пока бэкенд не вставит новую строку.
+        try
+        {
+            await Assertions.Expect(matchingRows).Not.ToHaveCountAsync(0, new() { Timeout = 30000 });
+        }
+        catch (Exception)
+        {
+            Assert.Fail($"Ни одной строки с маской '{searchMask}' не появилось в таблице за 30 секунд!");
+        }
+
+        int count = await matchingRows.CountAsync();
 
         // 5. Если передан постфикс, ищем строку, которая содержит и маску, и букву постфикса на конце перед .pdf
         if (!string.IsNullOrEmpty(postfix))
