@@ -47,7 +47,7 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
                 new { Name = "RN Supervisor Investigation Form", Count = (int?)null },
                 // Помним, что Summary выключить нельзя, но включить обратно (на всякий случай) бэкенд позволит
                 new { Name = "Summary", Count = (int?)null },
-                new { Name = "Attachments", Count = (int?)5 } // Передаем 5 для аттачей
+                new { Name = "Attachments", Count = (int?)1 } // Передаем 5 для аттачей
             };
 
             // Цикл перебора и сброса конфигурации

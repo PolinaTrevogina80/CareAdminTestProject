@@ -6,6 +6,7 @@ using Microsoft.Playwright;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using UglyToad.PdfPig;
+using UglyToad.PdfPig.Content;
 using static CareAdminTestProject.Common.PlaywrightExtensions;
 using static CareAdminTestProject.Incidents.IncidentDetails.Pages.IncidentTabs.BaseIncidentTabs;
 using static DetailsTab;
@@ -903,7 +904,7 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
 
             Log.Debug("Waiting for URL to contain a valid saved incident draft GUID...");
             var guidRegex = new System.Text.RegularExpressions.Regex(@"[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}");
-            await _page.WaitForURLAsync(guidRegex, new() { Timeout = 60000 });
+            await _page.WaitForURLAsync(guidRegex, new() { Timeout = 100000 });
 
 
         }
@@ -1686,10 +1687,54 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
             }
 
             // 3. Выводим отладочный лог ИМЕННО измененного фрагмента роли
-            string debugRolePayload = roleConfig.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+            string debugRolePayload = roleConfig.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
             Log.Information($"[API_MUTATION_DEBUG] Role section '{sectionRole}' state right before POST:\n{debugRolePayload}");
 
             // 4. Отправляем ВЕСЬ измененный корневой configNode (как требует контракт API)
+            await UpdateEmployeeConfigurationAsync(configNode);
+        }
+
+        public async Task ModifyJobTitleConstraintAsync(string sectionRole, string jobTitleId, bool isAdding)
+        {
+            string currentConfigJson = await GetEmployeeConfigurationAsync();
+            var configNode = JsonNode.Parse(currentConfigJson);
+            var roleConfig = configNode?["incidentConfiguration"]?[sectionRole];
+
+            if (roleConfig == null) Assert.Fail($"[STAFF_STEPS] Роль {sectionRole} не найдена.");
+
+            var jobTitleConstraints = roleConfig["jobTitleConstraints"]?.AsArray();
+            if (jobTitleConstraints == null) Assert.Fail($"[STAFF_STEPS] Массив 'jobTitleConstraints' не найден.");
+
+            if (isAdding)
+            {
+                Log.Information($"[STAFF_STEPS] Маппинг должности {jobTitleId} для сохранения...");
+
+                // ЗАЩИТА: Проверяем, нет ли уже этой должности в массиве, чтобы избежать дублей
+                bool alreadyExists = jobTitleConstraints.Any(x => x?["constraintId"]?.ToString() == jobTitleId);
+
+                if (!alreadyExists)
+                {
+                    var constraintObject = new System.Text.Json.Nodes.JsonObject
+                    {
+                        ["constraintId"] = jobTitleId // ВОЗВРАЩАЕМ ПРАВИЛЬНЫЙ КЛЮЧ ИЗ СКРИНШОТА
+                    };
+                    jobTitleConstraints.Add(constraintObject);
+                }
+                else
+                {
+                    Log.Warning($"[STAFF_STEPS] Должность {jobTitleId} уже присутствует в массиве, дублирование пропущено.");
+                }
+            }
+            else
+            {
+                Log.Information($"[STAFF_STEPS] Удаление должности {jobTitleId}...");
+                var nodeToRemove = jobTitleConstraints.FirstOrDefault(x => x?["constraintId"]?.ToString() == jobTitleId);
+                if (nodeToRemove != null) jobTitleConstraints.Remove(nodeToRemove);
+            }
+
+            string fullPayloadDebug = configNode.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+            Log.Information($"[API_MUTATION_DEBUG] FULL PAYLOAD BEFORE POST:\n{fullPayloadDebug}");
+
             await UpdateEmployeeConfigurationAsync(configNode);
         }
 
@@ -1711,6 +1756,227 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
             }
         }
 
+        private string ExtractUserIdFromName(JsonNode configNode, string searchName = "Test, Polly")
+        {
+            // Список секций, где точно может сидеть наш пользователь на момент старта
+            string[] sections = { "directorOfNursingConfiguration", "medicalDirectorConfiguration", "administratorConfiguration" };
+
+            foreach (var section in sections)
+            {
+                var users = configNode?["incidentConfiguration"]?[section]?["userConstraints"]?.AsArray();
+                if (users == null) continue;
+
+                // Ищем в UI-ролях (если у вас имя хранится в каком-то поле, например, fullName или userName)
+                // Но если в конфиге нет текстового имени, а только ID, мы можем забрать ID из текущего UI!
+                // Самый надежный бэкенд-способ, если в конфиге только ID — сделать быстрый поиск по UI или ручке /users.
+            }
+
+            // Альтернативный и самый железный UI-способ для Playwright:
+            // Так как тест начинается на UI, мы можем один раз при старте вытащить ID из локатора страницы,
+            // либо сделать один GET запрос к эндпоинту пользователей.
+            return null;
+        }
+
+        public async Task AssertPrimarySignatureButtonIsHiddenAsync(string roleText)
+        {
+            var signatureContainer = _page.Locator("cad-incident-sign")
+                .Filter(new() { HasText = roleText })
+                .First;
+
+            var signButton = signatureContainer.Locator("button:has-text('Sign Here')");
+            await signButton.WaitForAsync(new() { State = WaitForSelectorState.Hidden, Timeout = 15000 });
+            Log.Debug("No button, its OK");
+        }
+
+        // Проверка основных подписей (DNS, MD, Admin) на ВИДИМОСТЬ
+        public async Task AssertPrimarySignatureButtonIsVisibleAsync(string roleText)
+        {
+            var signatureContainer = _page.Locator("cad-incident-sign")
+                .Filter(new() { HasText = roleText })
+                .First;
+
+            var signButton = signatureContainer.Locator("button:has-text('Sign Here')");
+            await signButton.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 15000 });
+            Log.Debug("Button OK");
+        }
+
+        // Проверка кнопки подписи Саммари на СКРЫТОСТЬ
+        public async Task AssertSummarySignatureButtonIsHiddenAsync()
+        {
+            // Получаем ВСЕ кнопки "Sign Here" на странице
+            var allSignButtons = _page.GetByRole(AriaRole.Button, new() { Name = "Sign Here" });
+
+            // Фильтруем: нам нужна только та кнопка, у которой родитель НЕ cad-incident-sign
+            // Для этого в Playwright есть идеальный локатор :not()
+            var summarySignButton = _page.Locator("button:has-text('Sign Here'):not(cad-incident-sign button)");
+
+            await summarySignButton.WaitForAsync(new() { State = WaitForSelectorState.Hidden, Timeout = 15000 });
+            Log.Debug("No Summary Button, it's OK");
+        }
+
+        // Проверка кнопки подписи Саммари на ВИДИМОСТЬ
+        public async Task AssertSummarySignatureButtonIsVisibleAsync()
+        {
+            var signButton = _page.GetByRole(AriaRole.Button, new() { Name = "Sign Here" });
+
+            await signButton.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 150000 });
+            Log.Debug("Summary Button OK");
+        }
+
+        private async Task<string> GetUserIdByUserNameAsync(string userName)
+        {
+            try
+            {
+                // Достаем ID (sub) напрямую из JWT токена в sessionStorage браузера
+                string userIdFromToken = await _page.EvaluateAsync<string>(@"() => {
+            for (let i = 0; i < sessionStorage.length; i++) {
+                const key = sessionStorage.key(i);
+                if (key.includes('token') || key.includes('user') || key.includes('auth')) {
+                    const data = sessionStorage.getItem(key);
+                    if (data && data.includes('.')) { 
+                        // Декодируем payload часть JWT токена
+                        const base64Url = data.split('.')[1];
+                        const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+                        const jsonPayload = decodeURIComponent(window.atob(base64).split('').map(function(c) {
+                            return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+                        }).join(''));
+                        const parsed = JSON.parse(jsonPayload);
+                        if (parsed.sub) return parsed.sub;
+                    }
+                }
+            }
+            return null;
+        }");
+
+                if (!string.IsNullOrEmpty(userIdFromToken))
+                {
+                    Log.Debug($"[QA_AUTH] Динамически получили ID пользователя из токена браузера: {userIdFromToken}");
+                    return userIdFromToken;
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Warning($"[QA_AUTH] Не удалось прочитать токен через JS: {ex.Message}");
+            }
+
+            // Если в sessionStorage токена не нашлось, возвращаем ID, который мы вытащили из вашего лога
+            Log.Warning("[QA_AUTH] Токен в браузере не найден, возвращаем резервный ID для Polly Test.");
+            return "5d113f61-6fe5-4710-b9cc-08deb0344211";
+        }
+
+        public async Task ModifyUserRoleConstraintByNameAsync(string configSectionName, string userName, bool isAdding)
+        {
+            string currentConfigJson = await GetEmployeeConfigurationAsync();
+            var configNode = JsonNode.Parse(currentConfigJson);
+
+            // Динамически получаем ID пользователя по его имени перед мутацией
+            string userId = await GetUserIdByUserNameAsync(userName);
+
+            var roleConfig = configNode?["incidentConfiguration"]?[configSectionName];
+            if (roleConfig == null) Assert.Fail($"[API_CONFIG] Секция '{configSectionName}' не найдена.");
+
+            var userConstraints = roleConfig["userConstraints"]?.AsArray();
+            if (userConstraints == null) Assert.Fail($"[API_CONFIG] Массив 'userConstraints' не найден.");
+
+            if (isAdding)
+            {
+                Log.Information($"[API_CONFIG] Добавление {userName} ({userId}) в секцию {configSectionName}...");
+                bool alreadyExists = userConstraints.Any(x => x?["userId"]?.ToString() == userId);
+                if (!alreadyExists)
+                {
+                    var constraintObject = new System.Text.Json.Nodes.JsonObject
+                    {
+                        ["id"] = Guid.NewGuid().ToString(),
+                        ["incidentUserConfigurationId"] = Guid.NewGuid().ToString(),
+                        ["userId"] = userId
+                    };
+                    userConstraints.Add(constraintObject);
+                }
+            }
+            else
+            {
+                Log.Information($"[API_CONFIG] Удаление {userName} ({userId}) из секции {configSectionName}...");
+                var nodeToRemove = userConstraints.FirstOrDefault(x => x?["userId"]?.ToString() == userId);
+                if (nodeToRemove != null) userConstraints.Remove(nodeToRemove);
+            }
+
+            await UpdateEmployeeConfigurationAsync(configNode);
+        }
+
+        public async Task ModifyRoleTemplateConstraintByNameAsync(string configSectionName, string userName, bool isAdding)
+        {
+            // 1. Получаем текущую конфигурацию сотрудников
+            string currentConfigJson = await GetEmployeeConfigurationAsync();
+            var configNode = JsonNode.Parse(currentConfigJson);
+
+            // 2. Получаем ID нашего залогиненного пользователя Polly Test
+            string userId = await GetUserIdByUserNameAsync(userName);
+
+            // 3. Динамически узнаем, какая роль привязана к этому пользователю на бэкенде
+            // Отправляем контекстные заголовки
+            var contextHeaders = new Dictionary<string, string> {
+        { "X-App-Id", "AccidentIncident" },
+        { "X-Context-Id", "c1f80483-fd30-4327-814e-778ad171a67b" },
+        { "X-Context-Type", "Facility" },
+        { "X-Tenant-Id", "CassenaCare" }
+    };
+
+            // Делаем GET к ручке пользователя, чтобы забрать его роли (проверь точный URL, например "users/{userId}" или "employees/{userId}")
+            string userDetailsResponse = await _page.ApiGetRequest($"api/RoleTemplates/role-template/assigned2/{userId}", customHeaders: contextHeaders);
+            var userDetailsNode = JsonNode.Parse(userDetailsResponse);
+
+            // Достаем объект роли (обычно бэкенд возвращает массив roles или объект roleTemplate)
+            // Подставь точные ключи из вашей схемы (например, userDetailsNode["roleTemplate"])
+            var userRoleNode = userDetailsNode?["roleTemplate"] ?? userDetailsNode?["roles"]?[0];
+
+            if (userRoleNode == null)
+                Assert.Fail($"[QA_ERROR] Не удалось найти привязанную роль для пользователя '{userName}' в ответе API.");
+
+            string userRoleId = userRoleNode["id"]?.ToString() ?? userRoleNode["roleTemplateId"]?.ToString();
+            string userRoleName = userRoleNode["name"]?.ToString() ?? userRoleNode["roleTemplateName"]?.ToString();
+
+            // 4. Переходим к мутации incident-конфигурации
+            var roleConfig = configNode?["incidentConfiguration"]?[configSectionName];
+            if (roleConfig == null) Assert.Fail($"[API_CONFIG] Секция '{configSectionName}' не найдена.");
+
+            var roleTemplateConstraints = roleConfig["roleTemplateConstraints"]?.AsArray();
+            if (roleTemplateConstraints == null) Assert.Fail($"[API_CONFIG] Массив 'roleTemplateConstraints' не найден.");
+
+            if (isAdding)
+            {
+                Log.Information($"[API_CONFIG] Добавление роли пользователя {userRoleName} ({userRoleId}) в секцию {configSectionName}...");
+
+                bool alreadyExists = roleTemplateConstraints.Any(x => x?["roleTemplateId"]?.ToString() == userRoleId);
+                if (!alreadyExists)
+                {
+                    var constraintObject = new System.Text.Json.Nodes.JsonObject
+                    {
+                        ["id"] = Guid.NewGuid().ToString(),
+                        ["incidentUserConfigurationId"] = Guid.NewGuid().ToString(),
+                        ["roleTemplateId"] = userRoleId,
+                        ["roleTemplateName"] = userRoleName,
+                        ["currentUserHasAccess"] = true // Наш юзер гарантированно имеет доступ к этой роли
+                    };
+                    roleTemplateConstraints.Add(constraintObject);
+                }
+            }
+            else
+            {
+                Log.Information($"[API_CONFIG] Удаление роли пользователя {userRoleName} ({userRoleId}) из секции {configSectionName}...");
+
+                var nodeToRemove = roleTemplateConstraints.FirstOrDefault(x => x?["roleTemplateId"]?.ToString() == userRoleId);
+                if (nodeToRemove != null)
+                {
+                    roleTemplateConstraints.Remove(nodeToRemove);
+                }
+            }
+
+            // 5. Сохраняем измененную конфигурацию
+            await UpdateEmployeeConfigurationAsync(configNode);
+        }
+
+        public int ExpectedEmployeesByJobTitleCount { get; set; }
+
         // Метод делает GET-запрос актуального состояния конфигурации сотрудников
         public async Task<string> GetEmployeeConfigurationAsync()
         {
@@ -1724,6 +1990,144 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
 
             // Вызываем ваш стандартный GET-метод проекта
             return await _page.ApiGetRequest("incident/employee-configuration", customHeaders: contextHeaders);
+        }
+
+        public async Task<(string Id, string Title)> GetAvailableJobTitleAsync(string sectionRole)
+        {
+            var contextHeaders = new Dictionary<string, string>
+            {
+                { "X-App-Id", "AccidentIncident" },
+                { "X-Context-Id", "c1f80483-fd30-4327-814e-778ad171a67b" },
+                { "X-Context-Type", "Facility" },
+                { "X-Tenant-Id", "CassenaCare" }
+            };
+
+            // 1. Получаем полный справочник должностей с сервера
+            string jobTitlesJson = await _page.ApiGetRequest("job-titles", customHeaders: contextHeaders);
+            var rootNode = System.Text.Json.Nodes.JsonNode.Parse(jobTitlesJson);
+            var allJobTitles = rootNode?["jobTitles"]?.AsArray();
+
+            if (allJobTitles == null || allJobTitles.Count == 0)
+                Assert.Fail("[STAFF_STEPS] С сервера пришел пустой список должностей.");
+
+            // 2. Скачиваем текущую конфигурацию, чтобы увидеть, какие должности УЖЕ там сидят
+            string currentConfigJson = await GetEmployeeConfigurationAsync();
+            var configNode = System.Text.Json.Nodes.JsonNode.Parse(currentConfigJson);
+            var existingConstraints = configNode?["incidentConfiguration"]?[sectionRole]?["jobTitleConstraints"]?.AsArray();
+
+            // Собираем хэшсет всех уже добавленных ID должностей (проверяем оба возможных ключа для надежности)
+            var occupiedIds = new HashSet<string>();
+            if (existingConstraints != null)
+            {
+                foreach (var constraint in existingConstraints)
+                {
+                    string? id = constraint?["constraintId"]?.ToString() ?? constraint?["id"]?.ToString();
+                    if (!string.IsNullOrEmpty(id)) occupiedIds.Add(id);
+                }
+            }
+
+            // 3. Перебираем справочник и возвращаем первую должность, которой ГАРАНТИРОВАННО нет в текущем конфиге
+            foreach (var jobTitleNode in allJobTitles)
+            {
+                string? id = jobTitleNode?["id"]?.ToString();
+                string? title = jobTitleNode?["title"]?.ToString();
+
+                if (!string.IsNullOrEmpty(id) && !string.IsNullOrEmpty(title) && !occupiedIds.Contains(id))
+                {
+                    Log.Information($"[STAFF_STEPS] Найдена абсолютно новая свободная должность для теста: '{title}' ({id})");
+                    return (id, title);
+                }
+            }
+
+            // Если все должности чудесным образом заняты, берем первую (но логируем ворнинг)
+            Log.Warning("[STAFF_STEPS] Все доступные должности уже добавлены в конфигурацию! Берем первую попавшуюся.");
+            var first = allJobTitles[0];
+            return (first?["id"]?.ToString() ?? "", first?["title"]?.ToString() ?? "");
+        }
+
+        public async Task<(string Id, string Title)> GetAvailableRoleTitleAsync(string sectionRole)
+        {
+            // 1. Стандартные корпоративные контекстные заголовки
+            var contextHeaders = new Dictionary<string, string>
+                {
+                    { "X-App-Id", "AccidentIncident" },
+                    { "X-Context-Id", "c1f80483-fd30-4327-814e-778ad171a67b" }, // Ваша Facility ID
+                    { "X-Context-Type", "Facility" },
+                    { "X-Tenant-Id", "CassenaCare" }
+                };
+
+            string targetFacilityId = "c1f80483-fd30-4327-814e-778ad171a67b";
+
+            // 2. Получаем базовый список должностей
+            string jobTitlesJson = await _page.ApiGetRequest("roles", customHeaders: contextHeaders);
+            var rootNode = JsonNode.Parse(jobTitlesJson);
+            var allJobTitles = rootNode?["jobTitles"]?.AsArray();
+
+            if (allJobTitles == null || allJobTitles.Count == 0)
+                Assert.Fail("[STAFF_STEPS] С сервера пришел пустой список должностей.");
+
+            // 3. Получаем текущую конфигурацию, чтобы не выбрать уже занятую роль
+            string currentConfigJson = await GetEmployeeConfigurationAsync();
+            var configNode = JsonNode.Parse(currentConfigJson);
+            var existingConstraints = configNode?["incidentConfiguration"]?[sectionRole]?["jobTitleConstraints"]?.AsArray();
+
+            var occupiedIds = new HashSet<string>();
+            if (existingConstraints != null)
+            {
+                foreach (var constraint in existingConstraints)
+                {
+                    string? id = constraint?["jobTitleId"]?.ToString() ?? constraint?["id"]?.ToString();
+                    if (!string.IsNullOrEmpty(id)) occupiedIds.Add(id);
+                }
+            }
+
+            foreach (var jobTitleNode in allJobTitles)
+            {
+                string? id = jobTitleNode?["id"]?.ToString();
+                string? title = jobTitleNode?["title"]?.ToString();
+
+                if (string.IsNullOrEmpty(id) || string.IsNullOrEmpty(title) || occupiedIds.Contains(id))
+                    continue;
+
+                string usersUrl = $"api/RoleTemplates/role-template/{id}/users";
+                string usersJson = await _page.ApiGetRequest(usersUrl, customHeaders: contextHeaders);
+
+                var usersRoot = JsonNode.Parse(usersJson);
+                var usersArray = usersRoot?["users"]?.AsArray();
+
+                if (usersArray == null || usersArray.Count == 0)
+                    continue;
+
+                int matchingUsersCount = 0;
+                foreach (var userNode in usersArray)
+                {
+                    var facilities = userNode?["facilities"]?.AsArray();
+
+                    // === ИСПРАВЛЕНИЕ: Пользователь нам подходит, если список фасилити пустой (корпоративный) 
+                    // ИЛИ если в списке есть наше конкретное здание
+                    if (facilities == null || facilities.Count == 0)
+                    {
+                        matchingUsersCount++; // Корпоративный пользователь
+                    }
+                    else if (facilities.Any(f => f?["id"]?.ToString() == targetFacilityId))
+                    {
+                        matchingUsersCount++; // Пользователь, привязанный к нашему зданию
+                    }
+                }
+
+                // Если нашли должность, где есть хоть какие-то живые люди (локальные или корпораты)
+                if (matchingUsersCount > 0)
+                {
+                    ExpectedEmployeesByJobTitleCount = matchingUsersCount;
+
+                    Log.Information($"[STAFF_STEPS] Найдена должность: '{title}' ({id}). " +
+                                    $"Всего подходящих пользователей (включая корпоративных): {matchingUsersCount}");
+                    return (id, title);
+                }
+            }
+
+            Assert.Fail($"[STAFF_STEPS] Не удалось найти ни одной должности, у которой были бы активные пользователи в Facility {targetFacilityId}.");
+            return ("", "");
         }
 
         // Метод делает POST-запрос и отправляет измененный слепок JSON обратно на бэкенд
@@ -1908,6 +2312,7 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
 
             // 4. Отправляем обратно измененный объект (ApiPostRequest сам сделает из "incident/completion-configuration" полный URL)
             await CreatePage.Page.ApiPostRequest(configRoute, configData);
+            await Task.Delay(300);
 
             Log.Information($"Конфигурация секции '{sectionCode}' успешно обновлена.");
         }

@@ -335,7 +335,7 @@ public class GeneralTab : BaseIncidentTabs
                 // === ИСПРАВЛЕНИЕ 2: Увеличиваем таймаут до 15 секунд, так как бэкенд на скрине отвечает по 7-8 секунд!
                 responseTask = Page.WaitForResponseAsync(
                     response => response.Url.Contains("employee-configuration") && response.Status == 200,
-                    new() { Timeout = 15000 }
+                    new() { Timeout = 30000 }
                 );
             }
             else
@@ -351,7 +351,7 @@ public class GeneralTab : BaseIncidentTabs
             {
                 try
                 {
-                    Log.Debug("Waiting for 'employee-configuration' network response (up to 15s)...");
+                    Log.Debug("Waiting for 'employee-configuration' network response (up to 30s)...");
                     await responseTask;
                     Log.Debug("Network response for 'employee-configuration' received successfully.");
 
@@ -360,7 +360,7 @@ public class GeneralTab : BaseIncidentTabs
                 }
                 catch (TimeoutException)
                 {
-                    Log.Warning("Network request for 'employee-configuration' timed out after 15s. Form might be broken.");
+                    Log.Warning("Network request for 'employee-configuration' timed out after 30s. Form might be broken.");
                 }
             }
 

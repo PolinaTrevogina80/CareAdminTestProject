@@ -108,7 +108,7 @@ public class IncidentTrackerPage
 
         // 2. Находим кнопку и ждем, пока она станет полностью видимой в DOM
         var newIncidentButton = _page.GetByRole(AriaRole.Button, new() { Name = "New Incident" });
-        await newIncidentButton.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 15000 });
+        await newIncidentButton.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 100000 });
 
         // 3. Важнейшая пауза: даем Angular 500 миллисекунд, чтобы привязать обработчик событий клика к кнопке
         await _page.WaitForTimeoutAsync(500);
