@@ -498,25 +498,35 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
         /// <param name="toScreenShot">Pass true to capture an execution step screenshot; otherwise, false.</param>
         /// <returns>A task representing the asynchronous operation.</returns>
         public async Task UploadAttachmentTabAsync(
-        IReadOnlyList<string> categoryNames, // Accepts a list of categories for each page
-        string? note = null,
-        string? fileNameString = null,
-        bool toScreenShot = true)
+            IReadOnlyList<string> categoryNames,
+            string? note = null,
+            string? fileNameString = null,
+            bool toScreenShot = true,
+            bool expectSuccess = true) // <-- Добавили флаг сюда
         {
             await _createPage.ClickTabAsync("Attachments");
 
             string fileToUpload = string.IsNullOrEmpty(fileNameString)
                 ? fileName
-                : (Path.IsPathRooted(fileNameString)
-                    ? fileNameString
-                    : Path.Combine(AppContext.BaseDirectory, "TestData", "Files", fileNameString));
+                : (Path.IsPathRooted(fileNameString) ? fileNameString : Path.Combine(AppContext.BaseDirectory, "TestData", "Files", fileNameString));
 
-            await _createPage.Attachments.UploadAttachmentAsync(fileToUpload);
+            // Передаем флаг в метод POM
+            await _createPage.Attachments.UploadAttachmentAsync(fileToUpload, expectSuccess);
 
-            // Invoke your page-by-page mapping method, passing the entire list of categories
+            // Если мы ожидаем, что файл заблокируется, то шаги ниже выполнять НЕ нужно
+            if (!expectSuccess)
+            {
+                if (toScreenShot)
+                {
+                    await _page.MakeScreenshotAsync("Attachment_Validation_Success");
+                }
+                Log.Information($"Negative scenario verified for file '{fileToUpload}'. Dialog closed.");
+                return;
+            }
+
+            // --- Код для обычного успешного прохождения (выполняется только если expectSuccess == true) ---
             await _createPage.Attachments.AssignCategoriesToAllPagesAsync(categoryNames, note);
 
-            // Check the display of the first category from the list as a baseline verification
             if (categoryNames != null && categoryNames.Any())
             {
                 await _createPage.Attachments.VerifyAttachmentIsDisplayedAsync(categoryNames[0]);
@@ -524,9 +534,9 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
 
             if (toScreenShot)
             {
-                // NOTE: Review debug screenshot sequence
                 await _page.MakeScreenshotAsync("Attachment_Filled");
             }
+
             Log.Information($"Multi-page attachment file '{fileToUpload}' attached successfully.");
         }
 
@@ -1810,7 +1820,7 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
             // Для этого в Playwright есть идеальный локатор :not()
             var summarySignButton = _page.Locator("button:has-text('Sign Here'):not(cad-incident-sign button)");
 
-            await summarySignButton.WaitForAsync(new() { State = WaitForSelectorState.Hidden, Timeout = 15000 });
+            await summarySignButton.WaitForAsync(new() { State = WaitForSelectorState.Hidden, Timeout = 20000 });
             Log.Debug("No Summary Button, it's OK");
         }
 
@@ -1819,7 +1829,7 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
         {
             var signButton = _page.GetByRole(AriaRole.Button, new() { Name = "Sign Here" });
 
-            await signButton.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 150000 });
+            await signButton.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 20000 });
             Log.Debug("Summary Button OK");
         }
 
@@ -1915,11 +1925,11 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
             // 3. Динамически узнаем, какая роль привязана к этому пользователю на бэкенде
             // Отправляем контекстные заголовки
             var contextHeaders = new Dictionary<string, string> {
-        { "X-App-Id", "AccidentIncident" },
-        { "X-Context-Id", "c1f80483-fd30-4327-814e-778ad171a67b" },
-        { "X-Context-Type", "Facility" },
-        { "X-Tenant-Id", "CassenaCare" }
-    };
+                { "X-App-Id", "AccidentIncident" },
+                { "X-Context-Id", "4520B41E-7D01-4E8D-A720-DED920690F12" },
+                { "X-Context-Type", "Tenant" },
+                { "X-Tenant-Id", "CassenaCare" }
+            };
 
             // Делаем GET к ручке пользователя, чтобы забрать его роли (проверь точный URL, например "users/{userId}" или "employees/{userId}")
             string userDetailsResponse = await _page.ApiGetRequest($"api/RoleTemplates/role-template/assigned2/{userId}", customHeaders: contextHeaders);
@@ -1983,7 +1993,7 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
             var contextHeaders = new Dictionary<string, string>
             {
                 { "X-App-Id", "AccidentIncident" },
-                { "X-Context-Id", "c1f80483-fd30-4327-814e-778ad171a67b" }, // ID вашей Facility
+                { "X-Context-Id", "c1f80483-fd30-4327-814e-778ad171a67b" }, // ID Facility
                 { "X-Context-Type", "Facility" },
                 { "X-Tenant-Id", "CassenaCare" }
             };
@@ -2266,6 +2276,90 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Steps
             Log.Debug($"Шаг: Верификация отображения строки с категорией '{category}' в таблице.");
             // Просто перенаправляем вызов в ваш готовый метод из POM
             await CreatePage.Attachments.VerifyAttachmentIsDisplayedAsync(category);
+        }
+
+
+        public async Task VerifyAttachmentRowMetadataAsync(string category, string expectedEmail, DateTime expectedTime)
+        {
+            Log.Debug($"Шаг: Проверка метаданных строки вложения для категории '{category}' и режима Read-Only");
+
+            // 1. Получаем данные из слоя POM
+            var metadata = await CreatePage.Attachments.GetAttachmentRowMetadataAndStateAsync(category);
+
+            // 2. Форматируем ожидаемую дату в формат UI (MM/dd/yyyy), чтобы избежать падений из-за секунд
+            string expectedDateString = expectedTime.ToString("MM/dd/yyyy", System.Globalization.CultureInfo.InvariantCulture);
+
+            // 3. Выполняем проверки (NUnit)
+            // Проверяем email автора
+            Assert.That(metadata.Email, Does.Contain(expectedEmail),
+                $"Email автора вложения для категории '{category}' ({metadata.Email}) не совпадает с ожидаемым ({expectedEmail})!");
+
+            // Проверяем дату создания
+            Assert.That(metadata.TimeText, Does.Contain(expectedDateString),
+                $"Дата загрузки вложения для категории '{category}' ({metadata.TimeText}) не содержит ожидаемую дату ({expectedDateString})!");
+
+            // Проверяем, что поля находятся в режиме Read-Only (огород не городим, проверяем отсутствие инпутов прямо тут)
+            Assert.That(metadata.HasInputsInMetadata, Is.False,
+                $"Поля 'Added By' или 'Time' для категории '{category}' содержат активные элементы ввода (инпуты)! Ожидался режим Read-Only.");
+        }
+
+        public async Task VerifyAttachmentEditButtonsVisibilityAsync(bool isVisible)
+        {
+            Log.Debug($"Шаг: Убедимся, что ВСЕ кнопки редактирования файлов на вкладке находятся в состоянии видимости/активности: {isVisible}");
+
+            // 1. Получаем состояние всех элементов со страницы
+            var state = await CreatePage.Attachments.GetAllAttachmentsEditElementsStateAsync();
+
+            if (!isVisible)
+            {
+                // РЕЖИМ READ-ONLY (Инцидент подписан):
+
+                // Проверяем главную кнопку "+"
+                Assert.That(state.IsAddButtonVisible, Is.False,
+                    "Кнопка добавления нового файла '+' все еще отображается на экране после подписания инцидента!");
+
+                // Проверяем, что ни в одной строке нет активной иконки удаления
+                Assert.That(state.AllDeleteIconsActive, Has.None.True,
+                    "Обнаружены активные или видимые иконки удаления (trash) в строках файлов после подписания инцидента!");
+
+                // Проверяем, что ни в одной строке дропдаун не остался доступным для клика
+                Assert.That(state.AllDropdownsEnabled, Has.None.True,
+                    "Обнаружены активные дропдауны категорий в таблице вложений! Ожидалось, что все они будут задизейблены.");
+            }
+            else
+            {
+                // РЕЖИМ РЕДАКТИРОВАНИЯ (До подписания):
+                Assert.That(state.IsAddButtonVisible, Is.True, "Кнопка добавления файла '+' скрыта, хотя инцидент еще не подписан!");
+                Assert.That(state.AllDropdownsEnabled, Has.None.False, "Обнаружены заблокированные дропдауны категорий до подписания инцидента!");
+            }
+        }
+
+        public async Task VerifyAttachmentErrorMessageDisplayedAsync(string expectedErrorMessage)
+        {
+            Log.Debug($"Шаг: Проверка отображения ошибки валидации файла в диалоге: '{expectedErrorMessage}'");
+
+            // 1. Получаем фактический текст ошибки из попапа внутри модалки
+            string actualErrorMessage = await CreatePage.Attachments.GetErrorMessageTextAsync();
+
+            // 2. Выполняем проверку (NUnit)
+            Assert.That(actualErrorMessage, Does.Contain(expectedErrorMessage),
+                $"Текст ошибки в диалоге загрузки ('{actualErrorMessage}') не совпадает с ожидаемым ('{expectedErrorMessage}')!");
+
+            // 3. Закрываем диалоговое окно по кнопке "Close", так как кнопка "Next" заблокирована ошибкой
+            await CreatePage.Attachments.ClickCloseUploadDialogAsync();
+        }
+        public async Task VerifyAssignPagesPopupVisibilityAsync(bool isVisible)
+        {
+            Log.Debug($"Шаг: Проверка видимости попапа 'Assign Pages'. Ожидается видимость: {isVisible}");
+
+            // Получаем фактическое состояние из POM
+            bool isPopupVisible = await CreatePage.Attachments.IsAssignPagesPopupVisibleAsync();
+
+            // Проверяем через NUnit
+            Assert.That(isPopupVisible, Is.EqualTo(isVisible),
+                isVisible
+                    ? "Попап 'Assign Pages' не появился на экране, хотя должен был!"
+                    : "Попап 'Assign Pages' отображается на экране, хотя для этого формата файла он должен быть пропущен!");
         }
 
         /// <summary>

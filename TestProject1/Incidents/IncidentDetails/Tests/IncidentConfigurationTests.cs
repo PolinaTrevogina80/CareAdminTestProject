@@ -421,12 +421,12 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
                 // ТЕАРДАУН: Что бы ни случилось в тесте (упал или прошел), возвращаем 
                 // индивидуальные права пользователя назад, чтобы не ломать соседние тесты!
                 // =========================================================================
-                Log.Information("[TEARDOWN] Восстановление исходной конфигурации пользователя...");
-                foreach (var section in sections)
-                {
-                    await steps.ModifyUserRoleConstraintByNameAsync(section, targetUserId, isAdding: true);
-                    await steps.ModifyRoleTemplateConstraintByNameAsync(section, targetUserId, isAdding: true);
-                }
+                //Log.Information("[TEARDOWN] Восстановление исходной конфигурации пользователя...");
+                //foreach (var section in sections)
+                //{
+                //    await steps.ModifyUserRoleConstraintByNameAsync(section, targetUserId, isAdding: true);
+                //    await steps.ModifyRoleTemplateConstraintByNameAsync(section, targetUserId, isAdding: true);
+                //}
             }
         }
 

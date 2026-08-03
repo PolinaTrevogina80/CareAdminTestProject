@@ -55,45 +55,63 @@ public class AttachmentsTab : BaseIncidentTabs
     /// <param name="filePath">The absolute system path to the target file (e.g., tempPath from the previous step).</param>
     /// <returns>A task representing the asynchronous operation.</returns>
     /// <exception cref="FileNotFoundException">Thrown if the provided target path cannot be resolved as an existing file on disk.</exception>
-    public async Task UploadAttachmentAsync(string filePath)
+    public async Task UploadAttachmentAsync(string filePath, bool expectSuccess = true)
     {
         if (!File.Exists(filePath))
             throw new FileNotFoundException($"File not found: {filePath}");
 
         string fileName = Path.GetFileName(filePath);
-
-        var addButton = Page.Locator("button").Filter(new()
-        {
-            Has = Page.Locator("mat-icon[data-mat-icon-name='add-icon'], mat-icon:has-text('add')")
-        });
+        var addButton = Page.Locator("button").Filter(new() { Has = Page.Locator("mat-icon[data-mat-icon-name='add-icon'], mat-icon:has-text('add')") });
         await addButton.ClickAsync();
         Log.Debug("Attach button is clicked");
 
-        // Search for an exact text match to avoid layout collision ambiguities with subheaders
         var popupHeader = Page.GetByText("Upload a file", new() { Exact = true });
         await popupHeader.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 10000 });
 
-        // 1. Await dynamic overlay dialog generation and assign the local file to the input element target
+        // 1. Прикладываем файл во входной элемент
         var fileInput = Page.Locator("cad-incident-add-attachment-dialog input[type='file']");
         await fileInput.SetInputFilesAsync(filePath);
 
-        // 2. Synchronize execution thread until the uploaded target file name renders inside the active queue grid list (.files-list inside your DOM)
-        fileName = Path.GetFileName(filePath);
-        var fileItem = Page.Locator(".files-list").GetByText(fileName);
-        await fileItem.WaitForAsync(new() { State = WaitForSelectorState.Visible });
+        if (expectSuccess)
+        {
+            // === ПОЗИТИВНЫЙ СЦЕНАРИЙ (Стандартное поведение) ===
+            // 2. Ждем файл в списке очереди
+            var fileItem = Page.Locator(".files-list").GetByText(fileName);
+            await fileItem.WaitForAsync(new() { State = WaitForSelectorState.Visible });
 
-        // 3. VERIFICATION CHECKPOINT: Await explicit element visibility of the specific filename string inside the attachment wizard container
-        var uploadedFile = Page.Locator("cad-incident-add-attachment-dialog").GetByText(fileName);
+            // 3. Проверяем видимость текста в контейнере диалога
+            var uploadedFile = Page.Locator("cad-incident-add-attachment-dialog").GetByText(fileName);
+            await uploadedFile.WaitForAsync(new() { State = WaitForSelectorState.Visible });
+            Log.Information("Attachment file selected");
 
-        // Wait until the text node representing the active uploaded file switches to a visible state
-        await uploadedFile.WaitForAsync(new() { State = WaitForSelectorState.Visible });
-        Log.Information("Attachment file selected");
+            // 4. Кликаем "Next" для перехода на следующий шаг назначения категорий
+            var nextButton = Page.GetByRole(AriaRole.Button, new() { Name = "Next" });
+            await nextButton.WaitForAsync(new() { State = WaitForSelectorState.Visible });
+            await nextButton.ClickAsync(new() { Timeout = 180000 });
+        }
+        else
+        {
+            // === НЕГАТИВНЫЙ СЦЕНАРИЙ (Файл просто игнорируется системой) ===
+            // 1. Проверяем, что файл НЕ появился в списке (ждем всего 1 секунду)
+            var fileItem = Page.Locator(".files-list").GetByText(fileName);
+            bool isFileVisible = await fileItem.IsVisibleAsync(new() { Timeout = 1000 });
 
+            if (isFileVisible)
+            {
+                throw new Exception($"Тест провален: Запрещенный файл '{fileName}' успешно добавился в список, хотя должен был проигнорироваться UI!");
+            }
 
-        // 4. Click the "Next" step progression button
-        var nextButton = Page.GetByRole(AriaRole.Button, new() { Name = "Next" });
-        await nextButton.WaitForAsync(new() { State = WaitForSelectorState.Visible });
-        await nextButton.ClickAsync(new() { Timeout = 180000 });
+            Log.Information($"[VALIDATION PASSED] Файл '{fileName}' успешно проигнорирован системой и не попал в список.");
+
+            // 2. Никаких сообщений не ждем. Просто закрываем модальное окно, чтобы вернуть интерфейс в исходное состояние
+            var cancelButton = Page.Locator("cad-incident-add-attachment-dialog").GetByRole(AriaRole.Button, new() { Name = "Cancel" })
+                                   .Or(Page.Locator("cad-incident-add-attachment-dialog").GetByText("Close")).First;
+
+            await cancelButton.ClickAsync();
+
+            // Небольшая задержка, чтобы модалка успела плавно закрыться
+            await Page.WaitForTimeoutAsync(500);
+        }
     }
 
     /// <summary>
@@ -397,6 +415,52 @@ public class AttachmentsTab : BaseIncidentTabs
     }
 
     /// <summary>
+    /// Ожидает появления сообщения об ошибке валидации внутри диалога загрузки файла и возвращает его текст.
+    /// </summary>
+    public async Task<string> GetErrorMessageTextAsync()
+    {
+        // Ищем контейнер ошибки внутри диалогового окна Angular Material
+        // Обычно такие поповеры имеют класс .mat-tooltip, .error-bubble или лежат прямо в структуре диалога рядом с иконкой ошибки
+        var errorLocator = Page.Locator("cad-incident-add-attachment-dialog")
+            .Locator("//div[contains(text(), 'maximum file size') or contains(text(), 'allowed') or contains(@class, 'error')]")
+            .Or(Page.Locator("cad-incident-add-attachment-dialog .mat-mdc-tooltip-element")) // на случай если это стандартный тултип
+            .Or(Page.Locator("cad-incident-add-attachment-dialog").GetByText("The maximum file size is", new() { Exact = false }))
+            .First;
+
+        // Ждем появления текста ошибки на экране
+        await errorLocator.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5000 });
+
+        string errorText = (await errorLocator.InnerTextAsync()).Trim();
+        Log.Debug($"[POM] Извлечен текст ошибки из диалога загрузки: '{errorText}'");
+
+        return errorText;
+    }
+
+    /// <summary>
+    /// Нажимает кнопку "Close" в диалоговом окне загрузки файла, чтобы закрыть его после ошибки.
+    /// </summary>
+    public async Task ClickCloseUploadDialogAsync()
+    {
+        var closeButton = Page.Locator("cad-incident-add-attachment-dialog").GetByRole(AriaRole.Button, new() { Name = "Close" });
+        await closeButton.ClickAsync();
+        Log.Debug("[POM] Нажата кнопка 'Close' в диалоге загрузки файла");
+    }
+
+    /// <summary>
+    /// Проверяет, отображается ли в данный момент попап/шаг распределения страниц "Assign Pages".
+    /// </summary>
+    public async Task<bool> IsAssignPagesPopupVisibleAsync()
+    {
+        // Ориентируемся по заголовку или специфическому контейнеру шага Assign Pages
+        var assignPagesHeader = Page.GetByText("Assign Pages", new() { Exact = true })
+            .Or(Page.Locator("cad-incident-assign-pages-dialog")) // Предположительное имя компонента по аналогии
+            .First;
+
+        // Проверяем видимость без долгого ожидания, чтобы тест не тормозил
+        return await assignPagesHeader.IsVisibleAsync();
+    }
+
+    /// <summary>
     /// Extracts the numeric counter value from the "Attachments (X)" tab title.
     /// </summary>
     public async Task<int> GetTabCounterValueAsync()
@@ -415,6 +479,112 @@ public class AttachmentsTab : BaseIncidentTabs
         // Вытаскиваем число из скобок (0)
         var match = System.Text.RegularExpressions.Regex.Match(tabText, @"\((\d+)\)");
         return match.Success ? int.Parse(match.Groups[1].Value) : 0;
+    }
+
+    /// <summary>
+    /// Извлекает метаданные (Email, Дата) из строки таблицы по её категории 
+    /// и проверяет наличие активных инпутов для редактирования в ячейках метаданных.
+    /// </summary>
+    public async Task<(string Email, string TimeText, bool HasInputsInMetadata)> GetAttachmentRowMetadataAndStateAsync(string category)
+    {
+        // Находим строку таблицы tr, которая содержит ячейку/дропдаун с выбранной категорией
+        var rowLocator = Page.Locator("table tbody tr")
+            .Filter(new()
+            {
+                Has = Page.Locator("select, span, option").And(Page.GetByText(category, new() { Exact = true }))
+            })
+            .First;
+
+        // Ждем, пока строка появится
+        await rowLocator.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5000 });
+
+        // Локаторы для ячеек Added By (4-я колонка) и Time (5-я колонка)
+        var addedByCell = rowLocator.Locator("td").Nth(3);
+        var timeCell = rowLocator.Locator("td").Nth(4);
+
+        // Извлекаем чистый текст из ячеек
+        string email = (await addedByCell.InnerTextAsync()).Trim();
+        string timeText = (await timeCell.InnerTextAsync()).Trim();
+
+        Log.Debug($"[POM] Извлечены метаданные для категории '{category}': Email='{email}', Time='{timeText}'");
+
+        // Проверяем наличие активных инпута или текстареа внутри этих ячеек метаданных (для логики Read-Only)
+        int inputsCount = await addedByCell.Locator("input, textarea").CountAsync()
+                          + await timeCell.Locator("input, textarea").CountAsync();
+
+        bool hasInputsInMetadata = inputsCount > 0;
+
+        return (email, timeText, hasInputsInMetadata);
+    }
+
+    /// <summary>
+    /// Проверяет состояние кнопки добавления, а также собирает статусы кнопок удаления и дропдаунов абсолютно всех строк в таблице вложений.
+    /// </summary>
+    public async Task<(bool IsAddButtonVisible, List<bool> AllDeleteIconsActive, List<bool> AllDropdownsEnabled)> GetAllAttachmentsEditElementsStateAsync()
+    {
+        // 1. Локатор для главной кнопки добавления файла "+"
+        var addButton = Page.Locator("button").Filter(new() { HasText = "Add" }).Or(Page.Locator(".k-button-add")).First;
+        bool isAddButtonVisible = await addButton.IsVisibleAsync();
+
+        var allDeleteIconsActive = new List<bool>();
+        var allDropdownsEnabled = new List<bool>();
+
+        // 2. Получаем локатор для всех строк в теле таблицы
+        var rows = Page.Locator("table tbody tr");
+        int rowCount = await rows.CountAsync();
+        Log.Debug($"[POM] Найдено строк вложений для проверки блокировки: {rowCount}");
+
+        // 3. Проходимся циклом по каждой строке таблицы
+        for (int i = 0; i < rowCount; i++)
+        {
+            var currentRow = rows.Nth(i);
+
+            // Локатор кнопки удаления внутри текущей строки
+            var deleteButton = currentRow.Locator("button").Filter(new() { Has = Page.Locator(".k-i-trash, .fa-trash, [title='Delete']") }).First;
+            bool isDeleteActive = await deleteButton.IsVisibleAsync() && await deleteButton.IsEnabledAsync();
+            allDeleteIconsActive.Add(isDeleteActive);
+
+            // Локатор дропдауна категории
+            var categoryDropdown = currentRow.Locator("select, kendo-dropdownlist").First;
+
+            if (await categoryDropdown.IsVisibleAsync())
+            {
+                // --- ТЕСТОВОЕ ПОТЫКИВАНИЕ ---
+                // Пытаемся кликнуть по дропдауну, чтобы проверить, раскроется ли он
+                await categoryDropdown.ClickAsync();
+
+                // Локатор для всплывающего окна Kendo (оно обычно рендерится в корне body как kendo-popup)
+                // Добавим небольшой таймаут, чтобы не ждать долго, если он заблокирован
+                var kendoPopup = Page.Locator("kendo-popup, .k-animation-container").First;
+
+                // Проверяем, появился ли поп-ап на экране в течение 1.5 секунд
+                bool isPopupOpened = await kendoPopup.IsVisibleAsync() ||
+                                     (await categoryDropdown.GetAttributeAsync("aria-expanded") ?? "").Contains("true");
+
+                if (isPopupOpened)
+                {
+                    // дропдаун открылся! Значит он активен.
+                    allDropdownsEnabled.Add(true);
+
+                    // Закрываем его обратно, чтобы не мешать тесту, нажав Escape
+                    await Page.Keyboard.PressAsync("Escape");
+                    // Даем миллисекунды на закрытие анимации
+                    await Page.WaitForTimeoutAsync(300);
+                }
+                else
+                {
+                    // Потыкали, но ничего не открылось — дропдаун успешно задизейблен!
+                    allDropdownsEnabled.Add(false);
+                }
+            }
+            else
+            {
+                // Если компонента вообще нет на экране — редактирование недоступно
+                allDropdownsEnabled.Add(false);
+            }
+        }
+
+        return (isAddButtonVisible, allDeleteIconsActive, allDropdownsEnabled);
     }
 
     /// <summary>

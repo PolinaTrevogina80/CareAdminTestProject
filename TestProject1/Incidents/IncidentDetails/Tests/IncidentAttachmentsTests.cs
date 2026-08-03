@@ -282,5 +282,109 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
             // Проверяем, что строк по-прежнему одна
             await steps.VerifyAttachmentsCounterAndTableRowsAsync(expectedCount: 1);
         }
+
+        [Test]
+        public async Task AttachmentsTab_AutoPopulation_AddedByAndConverterTime()
+        {
+            // Пре-конфигурация и создание инцидента
+            await steps.FillAndSaveEntireIncident(data);
+
+            var tab = "Attachments";
+            await steps.SwitchToTab(tab);
+
+            string fileName = "test_1page.pdf";
+            string expectedUserEmail = "polly@test.ts"; 
+
+            // Действие: Загружаем файл
+            await steps.UploadAttachmentTabAsync(AttachmentsTab.AttachmentCategories, fileNameString: fileName);
+
+            // Берем первую категорию для проверки конкретной строки
+            string targetCategory = AttachmentsTab.AttachmentCategories.First();
+
+            // Проверка автозаполнения данных
+            await steps.VerifyAttachmentRowMetadataAsync(targetCategory, expectedUserEmail, expectedTime: DateTime.UtcNow);
+
+
+        }
+
+        [Test]
+        public async Task AttachmentsTab_Locking_ReadOnlyModeWhenIncidentSigned()
+        {
+            // Создаем инцидент и загружаем один тестовый файл, чтобы было что удалять
+            await steps.FillAndSaveEntireIncident(data);
+
+            // Имитируем полную блокировку инцидента подписями (DON/Admin)
+            // В зависимости от логики системы: либо через UI подписываем, либо переводим статус бэкендом
+            await steps.SignDNS();
+            await steps.AssertIncidentIsLockedAsync();
+
+            // Возвращаемся на вкладку вложений
+            await steps.SwitchToTab("Attachments");
+
+            // ПРОВЕРКА: Кнопки редактирования должна быть скрыты 
+            await steps.VerifyAttachmentEditButtonsVisibilityAsync(isVisible: false);
+
+        }
+
+        [Test]
+        public async Task AttachmentsTab_Validation_InvalidFormatAndEmptyFile()
+        {
+            await steps.FillGeneralTabAsync(data);
+            await steps.ClickCreateIncidentAsync();
+            await steps.SwitchToTab("Attachments");
+
+            // Попытка 1: Загрузка исполняемого файла (.exe)
+            await steps.UploadAttachmentTabAsync(
+                categoryNames: new List<string> { "Other" },
+                note: "Testing malicious exe",
+                fileNameString: "malicious_app.exe",
+                toScreenShot: true,
+                expectSuccess: false // <-- Магия здесь
+            ); await steps.VerifyAttachmentErrorMessageDisplayedAsync("Unsupported file format. Executable files are not allowed.");
+
+            // Попытка 2: Загрузка пустого файла (0 КБ)
+            await steps.UploadAttachmentTabAsync(
+                categoryNames: new List<string> { "Other" },
+                note: "Testing empty file",
+                fileNameString: "empty_file.txt",
+                toScreenShot: true,
+                expectSuccess: false
+            ); await steps.VerifyAttachmentErrorMessageDisplayedAsync("File cannot be empty.");
+        }
+
+        [Test]
+        public async Task AttachmentsTab_Validation_StandardFormatsDoNotTriggerAssignPages()
+        {
+            await steps.FillGeneralTabAsync(data);
+            await steps.ClickCreateIncidentAsync();
+            await steps.SwitchToTab("Attachments");
+
+            // Загружаем стандартный документ .doc или картинку .png
+            // Система должна применить категорию ко всему файлу целиком, не открывая попап нарезки страниц
+            await steps.UploadAttachmentTabAsync(AttachmentsTab.AttachmentCategories, fileNameString: "photo_evidence.png");
+
+            // ПРОВЕРКА: Попап распределения страниц ("Assign Pages") НЕ появился на экране
+            await steps.VerifyAssignPagesPopupVisibilityAsync(isVisible: false);
+
+            // Проверяем, что файл успешно добавился как 1 элемент/строка
+            await steps.VerifyAttachmentsCounterAndTableRowsAsync(expectedCount: 1);
+        }
+
+        [Test]
+        public async Task AttachmentsTab_Validation_LargeFileSizeLimitError()
+        {
+            await steps.FillGeneralTabAsync(data);
+            await steps.ClickCreateIncidentAsync();
+            await steps.SwitchToTab("Attachments");
+
+            // Попытка загрузить файл размером более 25 мегабайт
+            await steps.UploadAttachmentTabAsync(AttachmentsTab.AttachmentCategories, fileNameString: "30mb.pdf");
+
+            // ПРОВЕРКА: Система корректно обрабатывает ошибку лимита размера файла
+            await steps.VerifyAttachmentErrorMessageDisplayedAsync("File size exceeds the maximum limit of 25MB.");
+
+            // Проверяем, что счетчик остался нулевым и файл не попал в таблицу
+            await steps.VerifyAttachmentsCounterAndTableRowsAsync(expectedCount: 0);
+        }
     }
 }

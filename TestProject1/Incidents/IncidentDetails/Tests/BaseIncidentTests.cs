@@ -50,6 +50,12 @@ namespace CareAdminTestProject.Incidents.IncidentDetails.Tests
                 new { Name = "Attachments", Count = (int?)1 } // Передаем 5 для аттачей
             };
 
+            string targetUserId = "Test, Polly";
+
+            await steps.ModifyUserRoleConstraintByNameAsync("directorOfNursingConfiguration", targetUserId, isAdding: true);
+            await steps.ModifyUserRoleConstraintByNameAsync("medicalDirectorConfiguration", targetUserId, isAdding: true);
+            await steps.ModifyUserRoleConstraintByNameAsync("administratorConfiguration", targetUserId, isAdding: true);
+
             // Цикл перебора и сброса конфигурации
             foreach (var tab in tabsToReset)
             {

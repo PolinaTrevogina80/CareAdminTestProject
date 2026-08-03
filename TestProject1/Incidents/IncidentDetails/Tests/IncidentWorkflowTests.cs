@@ -123,5 +123,83 @@
             await steps.SignAdministrator();
             await steps.AssertIncidentIsLockedAsync();
         }
+
+        [Test]
+        public async Task IncidentSignature_Negative_UnauthorizedRole_DNSButtonIsHidden()
+        {
+            string targetUserId = "Test, Polly";
+            const string DNS_ROLE = "Director of Nursing";
+
+            // Создаем инцидент
+            await steps.ClearGeneralForm();
+            await steps.FillGeneralTabAsync(data);
+            await steps.FillDetailsTabAsync(data);
+            await steps.FillStateTabAsync(data);
+            await steps.FillMedicationTabAsync(data);
+            await steps.FillRNFormTabAsync(data);
+            await steps.ClickCreateIncidentAsync();
+            await steps.FillSummaryTabAsync(data);
+            await steps.ClickSaveIncidentAsync();
+            await steps.SwitchToTab("Summary");
+            await steps.SignSummaryAndVerifyAsync();
+            await steps.ClickSaveIncidentAsync(true);
+            await steps.UploadAttachmentTabAsync("Accident Report");
+
+            // ==========================================
+            // ШАГ 2: Проверка негативного кейса (Лишаем роли DNS)
+            // ==========================================
+            await steps.ModifyUserRoleConstraintByNameAsync("directorOfNursingConfiguration", targetUserId, isAdding: false);
+            await Page.ReloadAsync();
+
+            // ПРОВЕРКА: Пользователь без прав DNS не должен видеть кнопку "Sign Here" в первой колонке
+            await steps.AssertPrimarySignatureButtonIsHiddenAsync(DNS_ROLE);
+        }
+
+        [Test]
+        public async Task IncidentSignature_MDAndAdminButtonsHidden_UntilDNSSigns()
+        {
+            string targetUserId = "Test, Polly";
+            const string DNS_ROLE = "Director of Nursing";
+            const string MD_ROLE = "Medical Director";
+            const string ADMIN_ROLE = "Administrator";
+
+            // Создаем инцидент
+            await steps.ClearGeneralForm();
+            await steps.FillGeneralTabAsync(data);
+            await steps.FillDetailsTabAsync(data);
+            await steps.FillStateTabAsync(data);
+            await steps.FillMedicationTabAsync(data);
+            await steps.FillRNFormTabAsync(data);
+            await steps.ClickCreateIncidentAsync();
+            await steps.FillSummaryTabAsync(data);
+            await steps.ClickSaveIncidentAsync();
+
+            // Подписываем Саммари, чтобы перейти к блоку основных подписей
+            await steps.SwitchToTab("Summary");
+            await steps.SignSummaryAndVerifyAsync();
+            await steps.ClickSaveIncidentAsync(true);
+            await steps.UploadAttachmentTabAsync("Accident Report");
+
+            await Page.ReloadAsync();
+            await steps.SwitchToTab("Summary");
+
+            // ==========================================
+            // ШАГ 2: Проверка до подписи DNS
+            // ==========================================
+            // Кнопка DNS должна быть видна, так как права есть и это первая подпись
+            await steps.AssertPrimarySignatureButtonIsVisibleAsync(DNS_ROLE);
+
+            // ПРОВЕРКА: Кнопки MD и Admin строго скрыты, несмотря на наличие прав в конфиге (так как DNS еще не подписал)
+            await steps.AssertPrimarySignatureButtonIsHiddenAsync(MD_ROLE);
+            await steps.AssertPrimarySignatureButtonIsHiddenAsync(ADMIN_ROLE);
+
+            // ==========================================
+            // ШАГ 3: Ставим подпись DNS и проверяем активацию зависимых кнопок
+            // ==========================================
+            await steps.SignDNS();
+            // ПРОВЕРКА: После подписи DNS кнопки для MD и Admin обязаны стать видимыми
+            await steps.AssertPrimarySignatureButtonIsVisibleAsync(MD_ROLE);
+            await steps.AssertPrimarySignatureButtonIsVisibleAsync(ADMIN_ROLE);
+        }
     }
 }
